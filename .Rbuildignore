@@ -1,0 +1,10 @@
+^local_testing_and_equivalence$
+^\.claude$
+^HANDOFF\.md$
+^LEARNINGS\.md$
+^CHANGES\.md$
+^CLAUDE\.md$
+^AGENT-NOTE-.*\.md$
+^README\.Rmd$
+^cran-comments\.md$
+^.*\.tar\.gz$

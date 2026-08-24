@@ -1,0 +1,15 @@
+# Local-only tooling (never committed, mirrors Nestimate's convention)
+local_testing_and_equivalence/
+HANDOFF.md
+LEARNINGS.md
+CHANGES.md
+CLAUDE.md
+AGENT-NOTE-*.md
+cran-comments.md
+tmp/
+*.tar.gz
+.Rproj.user
+.Rhistory
+.RData
+.DS_Store
+.claude/

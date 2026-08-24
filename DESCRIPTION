@@ -1,0 +1,36 @@
+Package: honets
+Title: Higher-Order Network Analysis from Sequence Data
+Version: 0.1.0
+Authors@R: c(
+    person("Mohammed", "Saqr", email = "saqr@saqr.me", role = c("aut", "cre", "cph"))
+    )
+Description: Build and analyze higher-order networks from categorical
+    sequence data. Implements higher-order networks (HON) with rule
+    extraction Xu, Wickramarathne, and Chawla (2016)
+    <doi:10.1126/sciadv.1600028>, higher-order network embedding (HONEM)
+    Saebi et al. (2020) <doi:10.1089/big.2019.0169>, hypergeometric path
+    anomaly detection (HYPA) LaRock et al. (2020)
+    <doi:10.1137/1.9781611976236.52>, and the multi-order generative
+    model (MOGen) Scholtes (2017) <doi:10.1145/3097983.3098145>. Includes
+    a permutation-based Markov order test and a per-context path-dependence
+    diagnostic based on conditional Kullback-Leibler divergence.
+License: MIT + file LICENSE
+URL: https://github.com/mohsaqr/honets
+BugReports: https://github.com/mohsaqr/honets/issues
+Language: en-US
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends:
+    R (>= 4.4)
+Imports:
+    ggplot2,
+    grid,
+    graphics,
+    parallel,
+    stats,
+    utils
+Suggests:
+    gridExtra,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
