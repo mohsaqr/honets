@@ -1,3 +1,9 @@
+# honets 0.1.1
+
+* Added the consolidated family expansion roadmap (`EXPANSION-PLAN.md`,
+  build-ignored): honets higher-order features A1–A4 and the hypernets
+  hypergraph sibling (scaffolded 2026-08-25). No package code changed.
+
 # honets 0.1.0
 
 * Initial release. Code moved from Nestimate 0.9.0 (delegation T0): `build_hon()`,
