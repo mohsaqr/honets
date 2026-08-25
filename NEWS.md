@@ -1,3 +1,8 @@
+# honets 0.1.3
+
+* Roadmap: hypernets B2 (EDVW hypergraph PageRank) marked done in
+  `EXPANSION-PLAN.md`. No package code changed.
+
 # honets 0.1.2
 
 * Roadmap: hypernets B1 (windowed sequence hyperedges) marked done in
