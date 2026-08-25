@@ -1,3 +1,9 @@
+# honets 0.1.2
+
+* Roadmap: hypernets B1 (windowed sequence hyperedges) marked done in
+  `EXPANSION-PLAN.md` with the shipped design recorded. No package code
+  changed.
+
 # honets 0.1.1
 
 * Added the consolidated family expansion roadmap (`EXPANSION-PLAN.md`,
