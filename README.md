@@ -21,8 +21,12 @@ temporal models).
 | `markov_order_test()` | Permutation-based Markov order test | — |
 | `path_dependence()` | Per-context order-k vs order-1 KL diagnostic | Cover & Thomas (2006) |
 | `pathways()` | Pathway strings for simplicial visualization | — |
+| `bootstrap_hon()` | Bootstrap CIs + rule support for HON rules | Efron & Tibshirani (1993) |
+| `compare_hon()` | Two-sample permutation comparison of HON rules | Good (2005) |
 
-Accessors: `mogen_transitions()`, `path_counts()`.
+Accessors: `mogen_transitions()`, `path_counts()`. Bundled data:
+`human_long`, `ai_long` (coded human-AI pair-programming sessions).
+Tutorials: `Tutorial_docs/` (Rmd + rendered HTML).
 
 ## Provenance
 

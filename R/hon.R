@@ -703,6 +703,21 @@
 #' @noRd
 .hon_extract_rules <- function(trajectories, max_order, min_freq) {
   count <- .hon_build_observations(trajectories, max_order)
+  .hon_extract_rules_count(count, max_order, min_freq)
+}
+
+#' Extract rules from a precomputed observation-count environment
+#'
+#' The counts-based core of .hon_extract_rules(), split out so the
+#' inference verbs (bootstrap_hon, compare_hon) can re-run extraction on
+#' reweighted counts without re-scanning trajectories.
+#'
+#' @param count Environment from .hon_build_observations() (or an
+#'   equivalent weighted aggregation).
+#' @param max_order,min_freq As in .hon_extract_rules().
+#' @return list(rules, count).
+#' @noRd
+.hon_extract_rules_count <- function(count, max_order, min_freq) {
   distr <- .hon_build_distributions(count, min_freq)
   cache <- .hon_build_source_cache(distr)
   rules <- new.env(hash = TRUE, parent = emptyenv())

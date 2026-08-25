@@ -9,3 +9,5 @@
 ^cran-comments\.md$
 ^.*\.tar\.gz$
 ^EXPANSION-PLAN\.md$
+^tmp$
+^Tutorial_docs$
