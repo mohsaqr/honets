@@ -1,0 +1,107 @@
+url: https://mohsaqr.github.io/honets
+destination: pkgdown
+
+template:
+  bootstrap: 5
+
+reference:
+- title: Package
+  contents:
+  - honets-package
+
+- title: Memory networks
+  desc: A node is a state plus the memory of how it was reached.
+  contents:
+  - build_hon
+  - build_honem
+  - build_hypa
+  - build_mogen
+  - hon_centrality
+  - bootstrap_hon
+  - compare_hon
+  - markov_order_test
+  - path_dependence
+  - mogen_transitions
+  - path_counts
+  - pathways
+
+- title: Simplicial complexes
+  desc: A set of mutually related nodes together with every subset.
+  contents:
+  - build_simplicial
+  - betti_numbers
+  - euler_characteristic
+  - simplicial_degree
+  - q_analysis
+  - persistent_homology
+  - persistence_landscape
+  - bottleneck_distance
+  - verify_simplicial
+
+- title: Hypergraphs
+  desc: An arbitrary set of nodes bound as a unit.
+- subtitle: Constructors
+  contents:
+  - build_hypergraph
+  - window_hypergraph
+  - group_hypergraph
+  - knn_hypergraph
+  - dual_hypergraph
+- subtitle: Measures and centralities
+  contents:
+  - hypergraph_measures
+  - hypergraph_centrality
+  - hg_pagerank
+  - hg_edges
+- subtitle: Spectral methods
+  contents:
+  - hypergraph_laplacian
+  - hypergraph_cluster
+  - hypergraph_transduction
+- subtitle: Projections
+  contents:
+  - clique_expansion
+  - hg_project
+  - hg_line_graph
+- subtitle: Null models and neural networks
+  contents:
+  - hg_null_test
+  - hg_neural
+  - hg_hypergat
+
+- title: Text hypergraphs
+  desc: A corpus as a weighted document-word hypergraph, analysed with tidy verbs.
+  contents:
+  - text_hypergraph
+  - stop_words_en
+  - hg_measures
+  - hg_centrality
+  - hg_cluster
+  - hg_keywords
+  - hg_stability
+  - hg_agreement
+  - hg_seeds
+  - hg_classify
+
+- title: Methods and accessors
+  contents:
+  - starts_with("print.")
+  - starts_with("summary.")
+  - starts_with("plot.")
+  - starts_with("as.data.frame.")
+
+- title: Data
+  contents:
+  - long-data
+  - covid_abstracts
+  - covid_embeddings
+
+articles:
+- title: Text hypergraphs
+  navbar: ~
+  contents:
+  - text-hypergraphs
+  - text-constructions
+- title: Benchmarks
+  contents:
+  - articles/benchmarks

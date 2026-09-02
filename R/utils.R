@@ -1,10 +1,13 @@
 # ---- Shared internal helpers ----
 #
-# Copied verbatim from Nestimate (R/utils.R, R/estimate_network.R) as part of
-# the honets delegation (see Nestimate's HONETS-DELEGATION-PLAN.md). Nestimate
-# keeps its own copies of .coerce_sequence_input / .as_netobject /
-# .extract_edges_from_matrix (used elsewhere there); .ho_cograph_fields moves
-# here outright (its only callers are the HON-family builders).
+# Shared by all three structure families (memory networks, simplicial
+# complexes, hypergraphs). Copied verbatim from Nestimate (R/utils.R,
+# R/estimate_network.R, R/mcml.R) as part of the honets delegation (see
+# Nestimate's HONETS-DELEGATION-PLAN.md). Nestimate keeps its own copies of
+# .coerce_sequence_input / .as_netobject / .extract_edges_from_matrix /
+# .validate_mcml_matrix / .wrap_netobject (used elsewhere there);
+# .ho_cograph_fields moves here outright (its only callers are the
+# memory-family builders).
 
 #' Coerce tna or netobject to labeled sequence data.frame
 #'
@@ -192,5 +195,110 @@
       tna = list(method = method)
     ),
     node_groups = NULL
+  )
+}
+
+# =========================================================================
+# Matrix validation + minimal netobject wrapper (hypergraph family)
+# =========================================================================
+
+.validate_mcml_matrix <- function(mat) {
+  if (any(is.na(mat) | !is.finite(mat))) {
+    stop("x matrix must contain finite non-missing weights.", call. = FALSE)
+  }
+  row_names <- rownames(mat)
+  col_names <- colnames(mat)
+  has_row_names <- !is.null(row_names)
+  has_col_names <- !is.null(col_names)
+  if (has_row_names && (any(is.na(row_names)) || any(!nzchar(row_names)))) {
+    stop("x matrix row names must not contain missing or empty values.",
+         call. = FALSE)
+  }
+  if (has_col_names && (any(is.na(col_names)) || any(!nzchar(col_names)))) {
+    stop("x matrix column names must not contain missing or empty values.",
+         call. = FALSE)
+  }
+  if (has_row_names && anyDuplicated(row_names)) {
+    stop("x matrix row names must be unique.", call. = FALSE)
+  }
+  if (has_col_names && anyDuplicated(col_names)) {
+    stop("x matrix column names must be unique.", call. = FALSE)
+  }
+  if (has_row_names && has_col_names && !identical(row_names, col_names)) {
+    stop("x matrix row and column names must be identical and in the same order.",
+         call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+
+
+#' Wrap a weight matrix + optional data into a minimal netobject
+#' @noRd
+.wrap_netobject <- function(mat, data = NULL, method = "relative",
+                            directed = TRUE, inits = NULL) {
+  if (!is.matrix(mat) || !is.numeric(mat)) {
+    stop("'mat' must be a numeric matrix.", call. = FALSE)
+  }
+  if (nrow(mat) != ncol(mat)) {
+    stop("'mat' must be a square matrix.", call. = FALSE)
+  }
+  .validate_mcml_matrix(mat)
+  if (!is.character(method) || length(method) != 1L || is.na(method) ||
+      !nzchar(method)) {
+    stop("'method' must be a single non-missing character value.",
+         call. = FALSE)
+  }
+  if (!is.logical(directed) || length(directed) != 1L || is.na(directed)) {
+    stop("'directed' must be TRUE or FALSE.", call. = FALSE)
+  }
+  states <- rownames(mat)
+  if (is.null(states)) {
+    states <- as.character(seq_len(nrow(mat)))
+    dimnames(mat) <- list(states, states)
+  }
+  edges <- .extract_edges_from_matrix(mat, directed = directed)
+  nodes_df <- data.frame(
+    id = seq_along(states), label = states, name = states,
+    x = NA_real_, y = NA_real_, stringsAsFactors = FALSE
+  )
+  if (!is.null(inits)) {
+    if (!is.numeric(inits) || length(inits) != length(states) ||
+        any(is.na(inits) | !is.finite(inits))) {
+      stop("'inits' must be a finite numeric vector with one value per state.",
+           call. = FALSE)
+    }
+    if (!is.null(names(inits))) {
+      missing_inits <- setdiff(states, names(inits))
+      extra_inits <- setdiff(names(inits), states)
+      if (length(missing_inits) > 0L || length(extra_inits) > 0L) {
+        stop("'inits' names must match matrix state names.", call. = FALSE)
+      }
+      inits <- inits[states]
+    } else {
+      names(inits) <- states
+    }
+  }
+
+  structure(
+    list(
+      data       = data,
+      weights    = mat,
+      inits      = inits,
+      nodes      = nodes_df,
+      edges      = edges,
+      directed   = directed,
+      method     = method,
+      params     = list(),
+      scaling    = NULL,
+      threshold  = 0,
+      n_nodes    = length(states),
+      n_edges    = nrow(edges),
+      level      = NULL,
+      meta       = list(source = "nestimate", layout = NULL,
+                        tna = list(method = method)),
+      node_groups = NULL
+    ),
+    class = c("netobject", "cograph_network")
   )
 }

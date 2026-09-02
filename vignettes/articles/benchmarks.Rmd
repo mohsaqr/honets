@@ -1,0 +1,221 @@
+---
+title: "Benchmarks: R8, R52, MR, Ohsumed, 20NG"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+How far does closed-form hypergraph label spreading go on the five standard
+text-classification benchmarks? This article reports test-set accuracy of
+`text_hypergraph(sparse = TRUE)` + `hg_classify()` on R8, R52, MR, Ohsumed,
+and 20-Newsgroups, against a tf-idf nearest-centroid baseline and against
+the published accuracy tables in Ding et al. (2020). Every number below was
+produced by the harness in `benchmarks/` of the package repository; nothing
+is copied from memory.
+
+## Setup
+
+The corpora and train/test splits are the exact files of Yao, Mao & Luo
+(2019), which Ding et al. (2020) also use -- any other cleaning would make
+the numbers incomparable. `benchmarks/download.sh` fetches them. Each
+dataset becomes a sparse document--word hypergraph (documents are vertices,
+words are hyperedges, tf-idf incidence weights); the training documents are
+the labeled seeds; the spreading solution classifies every test document in
+one conjugate-gradient solve per class.
+
+```{r, eval = FALSE}
+hg <- text_hypergraph(docs, weight = "tfidf", sparse = TRUE)
+fit <- hg_classify(hg, labels = train_labels, normalization = "class_mass")
+```
+
+Two checks tie the pipeline to the published setup. The split sizes match
+Ding et al.'s Table 1 exactly on all five datasets. The vocabulary sizes
+match exactly on R8 (7,688 hyperedges) and R52 (8,892); on MR, Ohsumed and
+20NG ours are smaller (18,151 vs 18,764; 13,349 vs 14,157; 36,970 vs
+42,757) because the package tokenizer drops digit-containing tokens. MR has
+one document unreachable from the rest of the corpus; the harness runs on
+the giant component and would score unreachable test documents as errors
+(here that document is not in the test set).
+
+## Full-split results
+
+`accuracy` is test-set accuracy with a 1,000-resample percentile bootstrap
+CI; `fit_s` is the wall-clock seconds for the transductive solve itself.
+
+```{r}
+results <- read.csv("benchmark-results.csv")
+knitr::kable(
+  subset(results,
+         select = c(dataset, method, accuracy, ci_low, ci_high, macro_f1,
+                    build_s, fit_s)),
+  digits = 4
+)
+```
+
+Three findings. First, on the two class-balanced datasets the hypergraph
+classifier beats the centroid baseline outright: 0.8477 vs 0.7796 on 20NG
+and 0.7684 vs 0.6851 on MR. Second, on the skewed multi-class corpora (R8,
+R52, Ohsumed) the centroid wins; label spreading pays for class imbalance
+even after normalization, and R52's 52 heavily skewed classes are its worst
+case (0.5284 vs 0.8797). Third, the `hypergraph_zhou` rows -- the raw Zhou
+(2006) argmax with no normalization -- collapse onto the majority class
+(0.4947 on R8 is exactly the majority-class rate; 0.1020 on 20NG), which is
+why `normalization = "class_mass"` (Zhu, Ghahramani & Lafferty 2003) exists
+and is used everywhere else in this article. The EDVW walk
+(`hypergraph_random_walk_cmn`) is best on Ohsumed (0.5110 vs 0.4702) and
+second elsewhere.
+
+The cost side: the largest solve -- 20 classes over 18,846 documents x
+36,970 hyperedges -- fits in 1.2 seconds on a laptop CPU, with no training,
+no gradient steps and no GPU. Ding et al.'s Table 3 reports 1,479 MB of GPU
+memory for TextGCN and 180 MB for HyperGAT on the same corpus.
+
+## Against the published tables
+
+Published rows are means over 10 runs from Ding et al. (2020), Table 2;
+our transductive rows are deterministic given the split.
+
+```{r}
+published <- read.csv("benchmark-published.csv")
+knitr::kable(published, digits = 4)
+```
+
+On 20NG the hypergraph classifier (0.8477) is within two points of
+transductive TextGCN (0.8643) and HyperGAT (0.8662), and above fastText
+(0.7938). On MR (0.7684) it edges out published transductive TextGCN
+(0.7674) and trails HyperGAT (0.7832). On R8, R52 and Ohsumed the trained
+models are clearly ahead. The honest summary: a closed-form spectral method
+with zero trained parameters recovers most of the accuracy of trained
+graph neural networks on balanced corpora and is not competitive on
+skewed ones.
+
+## The low-label regime
+
+Label spreading is designed for few labels, so the full-split table above
+is its worst case. Here the training seeds are subsampled (stratified, at
+least one per class, five draws per fraction; the SD column is over
+draws) and both methods receive the same seeds.
+
+```{r}
+lowlabel <- read.csv("benchmark-lowlabel.csv")
+knitr::kable(lowlabel, digits = 4)
+```
+
+On MR the hypergraph classifier leads at every fraction, from 72 seeds
+(0.5675 vs 0.5541) to 1,422 seeds (0.6984 vs 0.6677): with few labels, the
+document--word structure carries information the centroid cannot use. On R8
+and Ohsumed the centroid stays ahead at every fraction -- strong tf-idf
+class signatures survive subsampling better than spreading does. Few
+labels help the case for structure, but they do not overturn the class
+balance effect.
+
+## The neural tier: HGNN
+
+`hg_neural()` trains the two-layer hypergraph convolutional network of
+Feng et al. (2019) natively in R ({torch}), on the same sparse
+document--word hypergraph and tf-idf features. Its propagation matrix is
+exactly the Zhou operator the transductive classifier spreads with --
+verified to machine precision in the tests, with forward-pass parity
+against the official implementation (DHG) at float32 precision. Training
+is stochastic, so every number is the mean of three seeds (SD and range
+shown); each run holds out 10% of the seeds (stratified) to pick the best
+epoch. Two configurations are reported: the original paper's
+(`lr = 0.001`, 200 epochs, tuned for citation graphs with dense features)
+and the package default (`lr = 0.01`, 600 epochs, selected by validation
+accuracy for high-dimensional sparse text features).
+
+```{r}
+neural <- read.csv("benchmark-neural.csv")
+knitr::kable(
+  subset(neural,
+         select = c(dataset, epochs, lr, accuracy, sd, acc_min, acc_max,
+                    macro_f1, fit_s)),
+  digits = 4
+)
+```
+
+The tuned configuration lifts R8 to 0.9539 (above the centroid's 0.9246;
+published TextGCN 0.9707) and R52 to 0.8440 (a 32-point jump over
+transduction's 0.5284, though still under the centroid), and holds MR at
+0.7692 -- the best HGNN number in this article for that dataset. On
+Ohsumed and 20NG, however, HGNN underperforms the closed-form
+transduction at every configuration tested (20NG: 0.5355 tuned, 0.6347
+at paper defaults, vs 0.8477 for transduction). The loss curves say this
+is not an optimization failure alone: the corpus-level document-node
+design oversmooths -- two rounds of propagation through high-degree word
+hyperedges blur exactly the distinctions 20 newsgroups need. The
+literature's answer is document-level hypergraphs with attention over
+hyperedges: HyperGAT, next.
+
+## HyperGAT: document-level hypergraphs with dual attention
+
+`hg_hypergat()` implements Ding et al. (2020) natively: every document
+becomes its own hypergraph (its unique words as vertices, its sentences
+as hyperedges), a first attention layer aggregates words into sentence
+representations, a second aggregates sentences back into words, and a
+masked mean pool feeds the classifier. The implementation mirrors the
+official code (verified against its source, with forward-pass parity at
+float32 precision), using sentence hyperedges -- the official default;
+the LDA topic hyperedges behind its `--use_LDA` flag are not
+implemented, so the closest published comparator is the paper's "w/o
+semantic" ablation. One further honest difference: the official
+preprocessing lemmatizes with WordNet; ours does not. The benchmark runs
+on the official repository's own corpus files (the TextGCN cleaned files
+used above contain no sentence punctuation at all), whose R8 split is
+5,501/2,190 rather than TextGCN's 5,485/2,189. Official training
+protocol throughout: 10 epochs, batch 8, StepLR, balanced class
+weights, 10% validation checkpointing; three torch seeds.
+
+```{r}
+hypergat <- read.csv("benchmark-hypergat.csv")
+knitr::kable(hypergat, digits = 4)
+```
+
+This is the package's strongest result. R8 reaches 0.9665 (SD 0.0034) --
+above every other method in this article, within 1.3 points of the full
+published HyperGAT (0.9797) and at published transductive TextGCN level
+(0.9707). R52 reaches 0.9433 (SD 0.0018), which **exceeds published
+transductive TextGCN (0.9356)** and sits 0.7 points from published
+HyperGAT (0.9498) -- against our previous R52 best of 0.8797 (the
+centroid). Wall-clock: under four minutes per training run on a laptop
+CPU. The architecture, not more optimization of the corpus-level
+design, was what the skewed news corpora needed.
+
+## When to use which
+
+Use `hg_classify(normalization = "class_mass")` when classes are roughly
+balanced or labels are scarce, and always over the raw argmax: the raw
+rule's majority-class collapse on skewed seeds is total. Use
+`type = "random_walk"` when tf-idf weights should shape the walk itself;
+it was best on Ohsumed here. Use the neural tier when plentiful labels can pay for training, and pick
+the architecture by corpus shape: `hg_hypergat()` for classification of
+documents with sentence structure -- it holds the package's best R8
+(0.9665) and R52 (0.9433, above published transductive TextGCN) -- and
+`hg_neural()` (HGNN) when the corpus-level hypergraph with rich vertex
+features is the natural object (it holds MR at 0.7692). Neither beats
+the closed-form classifier everywhere: on 20NG the transduction's
+0.8477 still leads everything we trained. For skewed many-class corpora
+without training, a tf-idf centroid remains a strong, nearly free
+baseline; the full published HyperGAT (with LDA hyperedges) holds the
+state of the art. The package's contribution is that every non-published
+row above runs natively in R -- the transductive ones in seconds, the
+neural ones in minutes on a CPU -- each from one verb.
+
+## References
+
+Feng, Y., You, H., Zhang, Z., Ji, R., & Gao, Y. (2019). Hypergraph
+neural networks. *AAAI 33*.
+
+Ding, K., Wang, J., Li, J., Li, D., & Liu, H. (2020). Be more with less:
+Hypergraph attention networks for inductive text classification.
+*EMNLP 2020*.
+
+Yao, L., Mao, C., & Luo, Y. (2019). Graph convolutional networks for text
+classification. *AAAI 2019*.
+
+Zhou, D., Huang, J., & Scholkopf, B. (2006). Learning with hypergraphs:
+Clustering, classification, and embedding. *NeurIPS 19*.
+
+Zhu, X., Ghahramani, Z., & Lafferty, J. (2003). Semi-supervised learning
+using Gaussian fields and harmonic functions. *ICML 20*.

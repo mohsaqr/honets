@@ -1,0 +1,274 @@
+---
+title: "HyperGAT in R: dual-attention text classification"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 8,
+                      fig.height = 5, cache = FALSE)
+library(honets)
+okabe <- c("#E69F00", "#56B4E9", "#009E73", "#CC79A7",
+           "#0072B2", "#D55E00", "#F0E442", "#999999")
+```
+
+Can dual-attention hypergraph classification -- HyperGAT, the strongest
+architecture in the package's literature base -- run natively in R at
+published-benchmark quality? This document walks `hg_hypergat()` from
+its construction to a full R8 benchmark run: what the model computes,
+how it trains, where its accuracy comes from, and where it is the wrong
+tool. Every number in the prose is computed in a chunk above it.
+
+## What the model computes
+
+HyperGAT (Ding et al. 2020) departs from every other verb in this
+package in one structural decision: instead of one corpus-wide
+hypergraph, **every document is its own hypergraph**. The document's
+unique words are the vertices; each of its sentences is a hyperedge
+joining the words it contains. Two attention layers then pass
+information across that structure:
+
+1. **Word to sentence.** Each sentence hyperedge builds a representation
+   by attending over its member words -- an attention weight decides
+   which words matter for that sentence.
+2. **Sentence to word.** Each word rebuilds its representation by
+   attending over the sentences it appears in -- a second attention
+   decides which sentences matter for that word.
+
+Two such layers, a masked mean pool over the document's words, and a
+linear classifier produce the label. Training touches only labeled
+documents; the model is inductive, so any document can be scored after
+training. The implementation mirrors the official code exactly
+(forward-pass parity at float32 precision is part of the package's
+verification suite), including its default construction: sentence
+hyperedges only, without the optional LDA topic hyperedges.
+
+The construction is easy to see on a real document:
+
+```{r}
+data(covid_abstracts)
+first_doc <- head(covid_abstracts, 1)
+strsplit(first_doc$abstract, "[.!?;]+")
+```
+
+Each element of that split is one future hyperedge; after tokenization
+and stop-word removal its remaining words are the vertices it joins.
+
+## A small worked example
+
+Six two-sentence documents, four labeled:
+
+```{r}
+docs <- c(
+  cooking_1 = "Simmer the soup slowly. Add onions and carrots to the pot.",
+  cooking_2 = "This soup recipe needs salt. Serve the dish on a cold night.",
+  cooking_3 = "Chop onions for the stew. Salt the broth and simmer.",
+  space_1 = "The telescope revealed a distant galaxy. Stars everywhere.",
+  space_2 = "Astronomers aimed the telescope. The stars were sharp.",
+  space_3 = "A comet passed the galaxy. Astronomers watched the stars."
+)
+toy_fit <- hg_hypergat(
+  docs,
+  labels = c(cooking_1 = "cooking", cooking_2 = "cooking",
+             space_1 = "space", space_2 = "space"),
+  embed_dim = 16, hidden = 8, epochs = 30, lr = 0.05,
+  validation = 0, seed = 1
+)
+toy_fit
+```
+
+The two unlabeled documents get the right classes from their sentence
+structure alone: `cooking_3` shares kitchen vocabulary with the cooking
+sentences, `space_3` shares astronomy vocabulary with the space ones.
+`score` is the softmax probability of the winning class and `margin`
+its lead over the runner-up -- the same tidy contract as `hg_classify()`
+and `hg_neural()`.
+
+## R8 at full scale
+
+R8 is the eight-class Reuters newswire benchmark. The TextGCN-cleaned
+files used elsewhere in the package's benchmarks contain no sentence
+punctuation, so this run uses the official HyperGAT repository's own
+corpus files, which keep sentences and ship their own train/test split
+(5,501 / 2,190). Training follows the official protocol: 10 epochs,
+batch size 8, learning rate 0.001 with a step decay, balanced class
+weights, 10% of the training labels held out to pick the best epoch.
+
+```{r r8-train, cache = TRUE}
+official <- file.path("..", "local_testing_and_equivalence",
+                      "HyperGAT_TextClassification", "data")
+r8_text <- readLines(file.path(official, "R8_corpus.txt"),
+                     encoding = "UTF-8", warn = FALSE)
+r8_meta <- within(
+  read.delim(file.path(official, "R8_labels.txt"), header = FALSE,
+             col.names = c("row", "split", "label"),
+             colClasses = "character"),
+  node <- sprintf("R8_%05d", seq_along(row))
+)
+names(r8_text) <- r8_meta$node
+timing <- system.time(
+  r8_fit <- hg_hypergat(r8_text,
+                        labels = subset(r8_meta,
+                                        grepl("train", split, fixed = TRUE),
+                                        select = c(node, label)),
+                        min_count = 5, seed = 1)
+)
+timing
+```
+
+`hg_hypergat()` takes the training labels directly as the tidy
+`(node, label)` table, and `hg_agreement()` scores the fit against the
+held-out rows of the same table:
+
+```{r}
+r8_test <- subset(r8_meta, grepl("test", split, fixed = TRUE))
+hg_agreement(r8_fit, r8_test)
+```
+
+Test accuracy 0.9652 on the 2,187 scored documents, from a
+three-minute training run on a laptop CPU (177 seconds when this
+document was authored) -- one verb call on raw text. Three of the
+2,190 held-out documents were dropped in preprocessing for having no
+usable tokens (the warning above); counting them as errors instead
+gives 0.9639 on the full test set. The package's 3-seed benchmark of
+the same verb, which additionally mirrors the official frequency
+window and scores the full split, averages 0.9665; the full published
+HyperGAT (LDA hyperedges, lemmatization, GPU) reports 0.9797. About a
+point of accuracy separates this R run from the published
+architecture.
+
+## Training dynamics
+
+```{r r8-curves, fig.height = 4}
+r8_history <- attr(r8_fit, "history")
+par(mfrow = c(1, 2))
+plot(r8_history$epoch, r8_history$loss, type = "b", pch = 19,
+     col = okabe[5], xlab = "Epoch", ylab = "Mean batch loss",
+     main = "Training loss")
+plot(r8_history$epoch, r8_history$val_accuracy, type = "b", pch = 17,
+     col = okabe[3], xlab = "Epoch", ylab = "Validation accuracy",
+     main = "Validation accuracy")
+par(mfrow = c(1, 1))
+r8_history
+```
+
+The loss falls an order of magnitude over the first three epochs
+(0.3761 to 0.0374) and flattens once the step decay cuts the learning
+rate after epoch 3. Validation accuracy is already 0.9635 after one
+epoch and settles at 0.9708, the checkpoint the returned model keeps.
+On R8 there is nothing to gain from training past roughly five epochs
+-- the model's capacity meets this dataset early.
+
+## Where the errors live
+
+```{r r8-confusion, fig.height = 6}
+scored <- merge(r8_fit, r8_test, by = "node", suffixes = c("_fit", ""))
+confusion <- xtabs(~ label + predicted, data = scored)
+confusion
+shades <- colorRampPalette(c("white", okabe[5]))(64)
+scaled <- sweep(unclass(confusion), 1, rowSums(confusion), "/")
+image(seq_len(ncol(scaled)), seq_len(nrow(scaled)),
+      t(scaled[rev(seq_len(nrow(scaled))), ]),
+      col = shades, axes = FALSE, xlab = "Predicted", ylab = "Truth",
+      main = "Row-normalized confusion")
+axis(1, at = seq_len(ncol(scaled)), labels = colnames(scaled), las = 2)
+axis(2, at = seq_len(nrow(scaled)), labels = rev(rownames(scaled)),
+     las = 1)
+```
+
+```{r}
+per_class <- within(
+  data.frame(class = colnames(confusion),
+             n_test = as.integer(rowSums(confusion)),
+             precision = as.numeric(diag(confusion) / colSums(confusion)),
+             recall = as.numeric(diag(confusion) / rowSums(confusion)),
+             row.names = NULL),
+  f1 <- 2 * precision * recall / (precision + recall)
+)
+per_class
+```
+
+The diagonal dominates every class, and the residual errors are
+semantic rather than random. The one systematic confusion is *interest*
+versus *money-fx* (11 and 7 cross-errors) -- adjacent monetary-policy
+categories that human coders also separate inconsistently. The weakest
+class is *ship*, the smallest (36 test documents, recall 0.72), which
+leaks into *crude* and *trade* -- shipping stories are usually about
+oil cargoes and trade routes. *earn*, half the test set, is nearly
+perfect at recall 0.99. A report built on these predictions should
+flag the interest/money-fx boundary and the ship class specifically;
+overall accuracy hides both.
+
+## In context
+
+The package's full benchmark study (three torch seeds; pkgdown
+benchmarks article) puts this run in context:
+
+```{r}
+read.csv(file.path("..", "vignettes", "articles",
+                   "benchmark-hypergat.csv"))
+```
+
+R8 0.9665 and R52 0.9433 over three seeds -- the package's best numbers
+on both datasets, with R52 above published transductive TextGCN
+(0.9356) and both within about a point of the full published HyperGAT
+(0.9797 / 0.9498), which additionally uses LDA topic hyperedges and a
+WordNet lemmatizer this implementation does not.
+
+## Where it is the wrong tool
+
+The architecture's price is its parameter count: the word-embedding
+table alone is vocabulary-by-300. With few labels there is nothing to
+estimate it from. On the bundled 165-abstract covid corpus with 20
+labeled documents (five per topic from the clustering in the covid
+analysis tutorial), three torch seeds:
+
+```{r covid-fewlabel, cache = TRUE}
+hg <- text_hypergraph(covid_abstracts, column = "abstract", id = "doc",
+                      weight = "tfidf", stop_words = stop_words_en())
+covid_topics <- hg_cluster(hg, k = 4, seed = 1, type = "random_walk")
+pool <- hg_cluster(hg, k = 4, seed = 1, type = "random_walk",
+                   what = "embedding")
+covid_runs <- do.call(rbind, lapply(1:3, \(s)
+  cbind(method = "hg_hypergat", torch_seed = s,
+        hg_agreement(hg_hypergat(covid_abstracts,
+                                 labels = hg_seeds(pool, n = 5),
+                                 column = "abstract", id = "doc",
+                                 epochs = 10, seed = s, validation = 0),
+                     covid_topics))))
+covid_runs
+aggregate(agreement ~ method, data = covid_runs, mean)
+```
+
+Mean agreement 0.45 with the reference topic partition -- against a
+stable 0.63 for the closed-form `hg_classify()` with the same 20 labels.
+The pattern is consistent across the package's whole neural tier: with
+dozens of labels, use label spreading; with thousands, HyperGAT is the
+strongest tool the package has.
+
+## When to use which
+
+`hg_hypergat()` is the right verb when documents have sentence
+structure and labels number in the thousands: it delivers the package's
+best benchmark accuracies in minutes on a CPU. `hg_neural()` (HGNN) fits
+when a corpus-level hypergraph with rich vertex features (for instance
+sbert embeddings) is the natural object. `hg_classify()` remains the
+choice for few labels, and on corpora without meaningful sentence
+boundaries (pre-cleaned text, transcripts stripped of punctuation) the
+sentence construction has nothing to build from -- check the corpus
+before choosing the architecture.
+
+## References
+
+Ding, K., Wang, J., Li, J., Li, D., & Liu, H. (2020). Be more with
+less: Hypergraph attention networks for inductive text classification.
+*EMNLP 2020*.
+
+Feng, Y., You, H., Zhang, Z., Ji, R., & Gao, Y. (2019). Hypergraph
+neural networks. *AAAI 33*.
+
+Zhou, D., Huang, J., & Scholkopf, B. (2006). Learning with hypergraphs:
+Clustering, classification, and embedding. *NeurIPS 19*.

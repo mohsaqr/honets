@@ -1,3 +1,243 @@
+# honets 0.3.0
+
+## The text family: texthypergraph folds into honets
+
+The `texthypergraph` package is retired and its whole surface now lives here,
+with its history of tests intact (491 shipped expectations came across; the
+merged suite passes in full). honets gains a fourth family, **text
+hypergraphs**, and the hypergraph family gains every generic method that
+texthypergraph had built under its frozen-Nestimate contract.
+
+* **New family — text hypergraphs.** `text_hypergraph()` (bag of words with
+  smoothed tf-idf, token windows, or embedding kNN; dense or sparse),
+  `stop_words_en()`, and the tidy verbs `hg_measures()`, `hg_centrality()`,
+  `hg_cluster()`, `hg_keywords()`, `hg_classify()`, `hg_stability()`,
+  `hg_agreement()`, `hg_seeds()`. Data: `covid_abstracts`,
+  `covid_embeddings`. Vignettes `text-hypergraphs` and `text-constructions`.
+* **Hypergraph family additions.** `knn_hypergraph()`, `dual_hypergraph()`,
+  `hg_pagerank()` (personalized EDVW PageRank, sparse-capable),
+  `hg_project()` (clique and association weightings), `hg_line_graph()`,
+  `hg_edges()`, `hg_null_test()` (swap and configuration nulls), and the
+  neural tier `hg_neural()` (HGNN) and `hg_hypergat()` (HyperGAT) in native
+  torch. Sparse `Matrix::dgCMatrix` incidences are supported end to end by
+  `hg_cluster()`, `hg_classify()`, `hg_pagerank()` and `hg_measures()`.
+* **`hypergraph_transduction(normalization = )`.** New argument, default
+  `"none"` (the raw Zhou 2006 argmax, unchanged behaviour). `"class_mass"`
+  divides each class column by its total spread mass before the argmax (Zhu,
+  Ghahramani & Lafferty 2003); without it, class-imbalanced seeds collapse
+  every prediction onto the majority class (on R8, every test document is
+  predicted "earn"). The result object records `$normalization`.
+* **Nestimate dependency removed.** texthypergraph delegated its incidence
+  construction and measures to Nestimate; those engines already lived here,
+  and `group_hypergraph()` is `identical()` to `Nestimate::bipartite_groups()`
+  up to the `member`/`player` argument name (tested). The package now
+  imports only ggplot2, graphics, grid, Matrix, methods, parallel, RSpectra,
+  stats and utils.
+* **Collisions resolved without a value change.** texthypergraph carried a
+  verbatim copy of the spectral trio; honets' copies were kept (they carry
+  the plot methods, `top =`, and scalar `edge_weights`), and only the
+  normalization argument was ported. `hg_pagerank()` agrees with
+  `hypergraph_centrality(type = "pagerank")` to `1e-10` (tested);
+  `hg_project(method = "clique")` equals `clique_expansion()` (tested);
+  `text_hypergraph(construction = "window")` and `window_hypergraph()`
+  produce the same incidence matrix on their shared domain (tested).
+* **Condition classes** of the incoming code are `honets_*`
+  (`honets_bad_input`, `honets_no_converge`,
+  `honets_hypergraph_disconnected`, `honets_empty_corpus`,
+  `honets_dropped_documents`, `honets_missing_embeddings`,
+  `honets_missing_torch`, `honets_nonpositive_similarity`,
+  `honets_sparse_unsupported`, `honets_sparse_too_large`,
+  `honets_configuration_collapse`).
+* **Infrastructure.** GitHub Actions (`R-CMD-check`, `pkgdown`), a pkgdown
+  reference index covering every topic, `VignetteBuilder: knitr`, the
+  benchmark harness under `benchmarks/` (build-ignored), and the
+  text-family equivalence suites (HyperNetX, HyperG, DHG, the official
+  HyperGAT code) under `local_testing_and_equivalence/`.
+
+# honets 0.2.1
+
+## Every accessor takes `top =`
+
+Every verb that can return many rows now takes a `top =` argument, so a
+caller never has to write `head()` around a result:
+
+```r
+as.data.frame(mo, what = "transitions", order = 2, top = 4)   # not head(..., 4)
+```
+
+`top` is applied **last** - after `what`, after every filter (`order_min`,
+`min_count`, `dim`, `k`, `dimension`, `significant`), and after `sort_by` -
+so `sort_by` and `top` compose: `top = n` is the first `n` rows of the table
+as ordered. `top = NULL` (the default) returns everything, and the default
+return of every accessor is unchanged. Semantics match the `top` that already
+shipped on `path_counts()` and `pathways()`.
+
+Added to: `as.data.frame()` for `net_hon`, `net_honem`, `net_hypa`,
+`net_mogen`, `net_markov_order`, `net_path_dependence`, `net_hon_boot`,
+`net_hon_compare`, `net_simplicial`, `net_q_analysis`,
+`net_persistent_homology`, `net_persistence_landscape`, `net_hypergraph`,
+`net_hypergraph_measures`, `net_hypergraph_cluster`,
+`net_hypergraph_transduction`; and to `mogen_transitions()`,
+`hon_centrality()`, `simplicial_degree()`, `hypergraph_centrality()`.
+
+`path_counts(top =)` now validates its argument like the rest of the family:
+a non-whole value such as `top = 2.5` is an error rather than a silent
+truncation to 2, matching how `k` already behaved.
+
+## Bug fix
+
+* `plot.net_path_dependence()` clipped the label of its highest-KL context -
+  the row the plot exists to show. The modal-flip labels are drawn to the
+  right of each point, and the panel did not extend past the largest value,
+  so ggplot cut the label off. The x scale now leaves room for it.
+
+## Documentation
+
+`docs/` (build-ignored) is reorganised from 23 per-verb vignettes into **four
+documents**, one per structure family plus an overview:
+`overview`, `memory-networks`, `simplicial-complexes`, `hypergraphs`. Each
+section is one verb, worked end to end on the same data; the per-verb sources
+are archived under `docs/_sections/`.
+
+They gain **37 figures**, drawn with cograph. honets results are dual-classed
+`cograph_network`, so `cograph::splot()` and `cograph::plot_simplicial()`
+take them with no conversion step. `cograph` is added to `Suggests` and every
+plot chunk is guarded on it.
+
+The prose was also rewritten to remove 37 `head()` and 12 `subset()` calls
+that subset a returned table on the public surface - the idiom `top =` now
+replaces.
+
+# honets 0.2.0
+
+honets becomes **the** higher-order networks package: one package covering
+all three structure families of the higher-order literature (Battiston et al.
+2020) — memory networks, simplicial complexes, and hypergraphs — under a
+single taxonomy.
+
+## Absorbed families
+
+* **Simplicial complexes and topological data analysis**, moved verbatim
+  from Nestimate 0.9.0: `build_simplicial()` (clique, Vietoris-Rips and
+  pathway complexes), `betti_numbers()`, `euler_characteristic()`,
+  `persistent_homology()`, `persistence_landscape()`,
+  `bottleneck_distance()`, `simplicial_degree()`, `q_analysis()`,
+  `verify_simplicial()`.
+* **Hypergraphs**, moved verbatim from Nestimate 0.9.0 by way of the
+  short-lived `hypernets` package (0.1.2, never released), which is folded in
+  and retired: `build_hypergraph()`, `window_hypergraph()`,
+  `group_hypergraph()`, `hypergraph_measures()`, `hypergraph_centrality()`,
+  `hypergraph_laplacian()`, `hypergraph_cluster()`,
+  `hypergraph_transduction()`, `clique_expansion()`.
+* The consolidation **deletes 223 lines of duplication** from hypernets'
+  323-line `utils.R` -- 171 of them the clique-enumeration closure copied out
+  of Nestimate's `simplicial.R`, the rest a `build_simplicial()` shim and a
+  second copy of honets' own `.extract_edges_from_matrix()`. hypernets had to
+  carry that closure because `build_hypergraph()` needs clique enumeration;
+  with both families in one package, `build_hypergraph()` calls the real
+  `build_simplicial()` again. The seven copied helpers were verified
+  byte-identical to Nestimate's originals before the copy was removed.
+
+## Taxonomy: renames
+
+All renames are to the **surface only**. No computed value changed anywhere —
+the `identical()` contracts against Nestimate 0.9.0 still hold for both
+absorbed families, with only these names normalised away
+(`local_testing_and_equivalence/test-identity-nestimate-{hypergraph,simplicial}.R`).
+
+Every result class now carries a `net_*` class:
+
+| Was | Is |
+|---|---|
+| `simplicial_complex` | `net_simplicial` |
+| `persistent_homology` (class) | `net_persistent_homology` |
+| `q_analysis` (class) | `net_q_analysis` |
+| `persistence_landscape` (class) | `net_persistence_landscape` |
+| `hypergraph_measures` (class) | `net_hypergraph_measures` |
+
+Constructors and arguments:
+
+| Was | Is | Why |
+|---|---|---|
+| `bipartite_groups()` | `group_hypergraph()` | it returns a hypergraph, not bipartite groups; now matches `window_hypergraph()` |
+| `bipartite_groups(player =)` | `group_hypergraph(member =)` | the column names hypergraph nodes, which need not be people |
+| `build_hypergraph(method =)` | `build_hypergraph(type =)` | same construction axis as `build_simplicial(type =)` |
+| `params$method` | `params$type`, plus `params$source` | every hypergraph constructor now records `source`, so a result says how it was built |
+
+Classed conditions are now uniformly `honets_*`:
+`hypernets_no_converge` and `nestimate_hypergraph_disconnected` became
+`honets_no_converge` (shared with the memory family's power iteration) and
+`honets_hypergraph_disconnected`.
+
+## Taxonomy: complete tidy-accessor coverage
+
+Every `net_*` result class now has an `as.data.frame()` method, so no result
+object requires reaching in with `$`. Eleven are new, each with a `what =`
+argument for its secondary table:
+
+* `net_hon` (`"rules"` / `"nodes"`, plus `order_min` and `sort_by`)
+* `net_honem` (`"embeddings"` / `"variance"`)
+* `net_hypa` (`"scores"` / `"over"` / `"under"`, plus `sort_by`)
+* `net_mogen` (`"orders"` / `"transitions"`)
+* `net_markov_order` (`"orders"` / `"null"`)
+* `net_path_dependence` (plus `min_count`, `sort_by`)
+* `net_simplicial` (`"simplices"` / `"f_vector"`, plus `dim`)
+* `net_q_analysis` (`"q_levels"` / `"nodes"`)
+* `net_persistent_homology` (`"persistence"` / `"betti"`, plus `dimension`,
+  `sort_by`)
+* `net_persistence_landscape` (plus `k`)
+* `net_hypergraph_measures` (`"nodes"` / `"edges"` / `"global"`, plus
+  `sort_by`)
+
+A regression test asserts the coverage, so a future `net_*` class without an
+accessor fails the suite.
+
+## Structure
+
+* `R/` is organised by family: `memory_*.R` (8 files), `simplicial_*.R` (4),
+  `hypergraph_*.R` (7), plus shared `utils.R`, `pathways.R`, `data.R` and the
+  package doc. Test files follow the same names.
+* Nestimate's 1,561-line `simplicial.R` was split along its real dependency
+  seams into `simplicial.R` (construction and structural measures),
+  `simplicial_filtration.R` (the filtration and Z/2 boundary-reduction layer
+  that both `build_simplicial(type = "vr")` and `persistent_homology()` sit
+  on) and `simplicial_homology.R`. Code unchanged; the split was verified
+  line-for-line content-preserving.
+
+## Other
+
+* `group_hypergraph()`'s weighted branch and `build_hypergraph()`'s incidence
+  fill are vectorised (they were `for` loops accumulating into a matrix).
+  Duplicate `(member, group)` cells are summed before assignment, which
+  index assignment alone would not do.
+* Package-level documentation (`?honets`) now states the three-family
+  taxonomy, the verb grammar, and how the families cross into one another.
+
+# honets 0.1.5
+
+* New verb `hon_centrality()` (roadmap item A2): PageRank, betweenness
+  and closeness computed on the higher-order topology and projected back
+  onto first-order states (Scholtes, Wider & Garas 2016). Semantics
+  follow pathpy 2.2.0 - that paper's reference implementation -
+  generalized from fixed-order to the variable-order networks
+  `build_hon()` produces, and verified against it: betweenness and
+  closeness match exactly (< 1e-10) on second- and third-order
+  topologies, PageRank to pathpy's own `tol = 1e-6`. The underlying
+  kernels additionally match `igraph` on the same topologies.
+  `project = FALSE` reports the centralities of the memory contexts
+  themselves; `projection =` chooses how a higher-order node's PageRank
+  is distributed ("scaled", "last", "first", "all"); `sort_by =` returns
+  the table ranked.
+* `build_hon()` gained the long-format interface already used by the
+  inference verbs: `action`, `actor` and `time` column names, so an
+  event table needs no manual splitting. Existing calls are unaffected
+  (the arguments default to `NULL`) and produce byte-identical networks.
+* New tutorial `Tutorial_docs/hon_centrality.html`: why the first-order
+  network of a dense corpus cannot rank its states at all (complete
+  digraph, uniform PageRank), what the higher-order ranking recovers,
+  which contexts carry the flow, and when betweenness and closeness are
+  saturated.
+
 # honets 0.1.4
 
 * New inference verbs for higher-order rules (roadmap item A1):

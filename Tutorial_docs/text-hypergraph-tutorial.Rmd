@@ -1,0 +1,411 @@
+---
+title: "Hypergraph text analysis with honets, stage by stage"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(honets)
+```
+
+A co-occurrence graph records that two words appeared together. A corpus
+knows more than that: a word binds *all* the documents containing it at
+once, a token window binds *all* the words inside it, and a document sits
+near *all* its semantic neighbors. A hypergraph — edges that contain any
+number of vertices — represents each of those facts directly instead of
+breaking them into pairs. honets' text family builds three such hypergraphs
+from a corpus and analyzes them with tidy verbs, on top of the hypergraph
+family's spectral methods of Zhou, Huang & Schölkopf (2006) and Hayashi,
+Aksoy, Park & Park (2020) (HyperNetX-parity verified) and its incidence
+and measures layer.
+
+The running corpus is the bundled `covid_abstracts`: 165 COVID-19
+education-research abstracts, up to 40 per year, 2020–2024.
+
+```{r data}
+head(covid_abstracts, 3)
+```
+
+Each stage below is one question, one verb, and a reading of the actual
+output.
+
+# Stage 1 — Construction: how does a corpus become a hypergraph?
+
+`text_hypergraph()` tokenizes deterministically in base R (lowercase, split
+on non-letter runs, possessives kept as one token) and hands a weighted
+incidence structure to `group_hypergraph()`. The smallest
+possible corpus makes every number checkable by eye:
+
+```{r tiny}
+tiny <- text_hypergraph(
+  c(a = "salt and soup", b = "soup and stars"),
+  weight = "tfidf"
+)
+tiny
+```
+
+Two documents became the vertices; the four distinct words became
+hyperedges — *soup* connects both documents, *stars* only one. The tidy
+accessor shows the exact incidence, one row per document–word pair:
+
+```{r tiny-weights}
+as.data.frame(tiny)
+```
+
+The `weight` column is smoothed tf-idf,
+`tf * (log((1 + N)/(1 + df)) + 1)`: *and* and *soup* occur in both of the
+two documents, so their idf is exactly 1; *salt* and *stars* occur in one,
+so they carry `log(3/2) + 1 = 1.405`. The smoothing (Manning, Raghavan &
+Schütze 2008, the scikit-learn `smooth_idf` variant) is deliberate — a
+plain `log(N/df)` gives weight zero to a word in every document, which
+would silently disconnect vertices.
+
+Two more accessors complete the corpus bookkeeping:
+
+```{r tiny-tables}
+as.data.frame(tiny, what = "documents")
+as.data.frame(tiny, what = "vocabulary")
+```
+
+## The real corpus, and the two orientations
+
+On real text, two decisions matter. First the stop list: `stop_words_en()`
+ships the English function words, and corpus boilerplate is added
+explicitly — in abstracts, that is words like *study* and *results*.
+Second `min_count`: a word seen fewer than a handful of times cannot
+connect anything and only inflates the vocabulary.
+
+```{r construct}
+stops <- c(
+  stop_words_en(),
+  "using", "used", "use", "based", "results", "study", "research",
+  "paper", "article", "findings", "data"
+)
+
+hg <- text_hypergraph(
+  covid_abstracts,
+  column = "abstract",
+  id = "doc",
+  weight = "tfidf",
+  stop_words = stops,
+  min_count = 3L
+)
+hg
+```
+
+165 document-vertices, 1,453 word-hyperedges; the median word touches 4
+abstracts, the most ubiquitous one 140 of 165. The `nodes` argument flips
+the orientation — words as vertices, documents as hyperedges — which is
+the right shape for questions about vocabulary rather than documents:
+
+```{r construct-word}
+word_hg <- text_hypergraph(
+  covid_abstracts,
+  column = "abstract",
+  id = "doc",
+  nodes = "word",
+  weight = "tfidf",
+  stop_words = stops,
+  min_count = 3L
+)
+word_hg
+```
+
+Same incidence, transposed meaning. Every verb below accepts either
+orientation; which one you build determines whether the answers are about
+documents or about words.
+
+# Stage 2 — Structure: is this hypergraph analyzable at all?
+
+Before any spectral method, `hg_measures()` reports the structural facts.
+The summary table answers the "can I even cluster this?" question:
+
+```{r measures-summary}
+hg_measures(hg, what = "summary")
+```
+
+Density 0.043 says a word-hyperedge contains on average 4.3% of all
+documents; a pairwise participation of 0.996 says nearly every pair of
+abstracts shares at least one word — one dense component, so the spectral
+machinery applies to the whole corpus (a disconnected hypergraph is
+refused by the clustering verbs with an explicit error, not analyzed
+wrongly). The node table ranks the documents themselves:
+
+```{r measures-nodes}
+head(hg_measures(hg))
+```
+
+`hyperdegree` counts how many distinct (kept) words a document
+contributes to; `strength` sums the sizes of those word-hyperedges, so it
+mixes how many words a document uses with how widely shared they are. The
+first abstract sits in 71 word-hyperedges whose sizes sum to 1,322 — a
+document built from broadly shared vocabulary, which will act as a hub in
+anything walk-based. On small hypergraphs the
+`edges` and `overlap` tables are readable directly:
+
+```{r measures-overlap}
+hg_measures(tiny, what = "edges")
+hg_measures(tiny, what = "overlap")
+```
+
+The overlap table is one row per hyperedge pair — *and* and *soup* share
+both their documents (Jaccard 1), each shares exactly one document with
+*salt* and *stars*. On the full corpus this table has
+`1453 * 1452 / 2` rows; it stays a data.frame you filter with arguments,
+not something to print.
+
+# Stage 3 — Centrality: which words organize the corpus?
+
+`hg_centrality()` computes three centralities: `clique` (eigenvector
+centrality on the weighted clique expansion — the "collapse to a graph"
+baseline) and the tensor `Z`- and `H`-eigenvector centralities (Benson
+2019), which use the hypergraph's higher-order structure directly instead
+of collapsing it. `sort_by` and `n` make top-k selection an argument, not
+a post-processing step. The windowed hypergraph of the 2020 abstracts
+(built fully in Stage 6) is small enough to compare definitions:
+
+```{r centrality}
+early <- subset(covid_abstracts, year == 2020)
+windowed <- text_hypergraph(
+  early,
+  column = "abstract",
+  id = "doc",
+  construction = "window",
+  window = 3,
+  stop_words = stops,
+  min_count = 3L
+)
+hg_centrality(windowed, type = c("clique", "H"), sort_by = "H", n = 8)
+```
+
+The two definitions agree on the theme vocabulary but not on its order:
+the clique expansion puts *education* far ahead (0.417) with *covid*
+second; the H-eigenvector keeps *education* first but demotes *covid* to
+eighth, promoting *learning*, *students* and *teachers*. The reading:
+*covid* co-occurs broadly but diffusely — pairwise collapse rewards that;
+the tensor centrality rewards words that sit in strong *whole windows*
+together, which is the teaching-and-learning cluster. When the ranking is
+the finding, report which centrality produced it.
+
+# Stage 4 — Clustering: do the abstracts group by theme?
+
+`hg_cluster()` embeds the hypergraph Laplacian and k-means the embedding
+(deterministically, with an explicit seed). Two Laplacians are available:
+`"zhou"` (Zhou et al. 2006) and `"random_walk"` — the Hayashi et al.
+(2020) construction whose random walk uses *edge-dependent vertex
+weights*. tf-idf is exactly such a weighting (the same word counts
+differently in different documents), so `"random_walk"` is the
+theory-matched choice here:
+
+```{r cluster}
+clusters <- hg_cluster(hg, k = 4, type = "random_walk", seed = 1)
+aggregate(node ~ cluster, data = clusters, FUN = length)
+```
+
+```{r cluster-years}
+merged <- merge(clusters, covid_abstracts, by.x = "node", by.y = "doc")
+aggregate(year ~ cluster, data = merged, FUN = mean)
+```
+
+Sizes 16/44/29/76, and every cluster's mean year sits between 2021.1 and
+2021.7: the partition is thematic, not temporal — this literature's
+vocabulary separates by topic while staying stable across the pandemic
+years. Does the Laplacian choice matter? Refit with `"zhou"` and
+cross-tabulate:
+
+```{r cluster-laplacian}
+clusters_zhou <- hg_cluster(hg, k = 4, type = "zhou", seed = 1)
+table(random_walk = clusters$cluster, zhou = clusters_zhou$cluster)
+```
+
+It matters a lot: no clean diagonal, whole clusters reshuffle. The two
+Laplacians answer differently because only one of them consumes the
+edge-dependent weights that tf-idf provides. The decisive practice: with
+tf-idf weighting, report the `"random_walk"` partition and use `"zhou"`
+only as a robustness view — groupings that survive both are the ones to
+build interpretation on. (The number of clusters is the other
+consequential choice; `vignette("text-hypergraphs")` runs the k = 3
+sensitivity check — the two compact themes are stable, the large residual
+cluster is not.)
+
+# Stage 5 — Classification: can six labels classify 165 documents?
+
+`hg_classify()` is transductive label spreading (Zhou et al. 2006):
+labels for a few vertices propagate over the hyperedges until every
+vertex has a score for every class. Labeling the three alphabetically
+first abstracts of 2020 as `"early"` and of 2024 as `"late"` asks whether
+pandemic-era vocabulary dates an abstract:
+
+```{r classify}
+labels <- c(
+  "2-s2.0-85085897904" = "early",
+  "2-s2.0-85087124472" = "early",
+  "2-s2.0-85087646998" = "early",
+  "2-s2.0-85107489479" = "late",
+  "2-s2.0-85112557152" = "late",
+  "2-s2.0-85113355756" = "late"
+)
+predictions <- hg_classify(hg, labels = labels)
+predicted_years <- merge(predictions, covid_abstracts,
+                         by.x = "node", by.y = "doc")
+aggregate(year ~ predicted, data = predicted_years, FUN = mean)
+table(
+  predicted = predicted_years$predicted,
+  actually_2020 = predicted_years$year == 2020
+)
+```
+
+The classifier commits to `"early"` for exactly three abstracts — every
+one genuinely from 2020 — and calls everything else `"late"`, 2020
+included. Correct where it commits, and honest about how weak the year
+signal is: this literature's vocabulary converged almost immediately. The
+`margin` column (best minus second-best score) is the per-document
+confidence; low margins mark documents the labels barely reach. The
+damping parameter `xi` controls how far labels spread, and here it is not
+doing the work:
+
+```{r classify-xi}
+predictions_90 <- hg_classify(hg, labels = labels, xi = 0.90)
+table(xi_099 = predictions$predicted, xi_090 = predictions_90$predicted)
+```
+
+Dropping xi from 0.99 to 0.90 flips 2 of 165 documents. The conservative
+result is a property of the corpus structure, not of the tuning
+parameter — which is exactly what a sensitivity check is for.
+
+# Stage 6 — Windowed hyperedges: does word order change the answer?
+
+The bag construction cannot see that *distance* and *learning* are a
+phrase. `construction = "window"` slides a token window over each
+document (never crossing document boundaries); each distinct window
+content — the set of words within `window` tokens of each other — is one
+hyperedge, weighted by its window count. This is the sequential
+construction of Ding et al. (2020, Sec. 3.2) with weights — the text
+front end of `window_hypergraph()`, with which it shares its incidence
+matrix (a shipped package test; a word repeated inside one window is
+collapsed by the set-valued hyperedge here and counted by the engine).
+Stop-word and `min_count` filtering run
+*before* windowing, so a removed token closes its gap.
+
+```{r window}
+windowed
+hg_centrality(windowed, type = "clique", sort_by = "clique", n = 10)
+```
+
+Compare the bag ranking on the same 40 abstracts:
+
+```{r window-vs-bag}
+bag_2020 <- text_hypergraph(
+  early,
+  column = "abstract",
+  id = "doc",
+  nodes = "word",
+  weight = "tfidf",
+  stop_words = stops,
+  min_count = 3L
+)
+hg_centrality(bag_2020, type = "clique", sort_by = "clique", n = 10)
+```
+
+Same corpus, same stop list, one different construction: the windowed
+ranking puts **distance** third and the bag ranking does not place it in
+the top ten at all. Adjacency is the signal — *distance* matters in 2020
+almost exclusively inside *distance learning* and *distance education*.
+The window size is arbitrary, so it gets the standard check
+(`vignette("constructions")` runs it): at `window = 4`, *distance* rises
+to second — the conclusion survives.
+
+One practical constraint: distinct windows multiply fast, and the
+engine's incidence is dense. Window modest corpora (here: 40 abstracts,
+2,000 windows, a 5 MB incidence) or filter hard first.
+
+# Stage 7 — kNN embedding hyperedges: does meaning beat vocabulary?
+
+Two abstracts can discuss the same phenomenon with disjoint vocabulary.
+`construction = "knn"` places each document in an embedding space and
+forms one hyperedge per document — itself plus its `k` nearest neighbors,
+weighted by cosine similarity. The bundled `covid_embeddings` matrix
+(sbert's pinned `all-MiniLM-L6-v2`, L2-normalized, built by
+`data-raw/covid_embeddings.R`) keeps everything offline; with the sbert
+package installed, omitting `embeddings` encodes the text in-place, and
+`knn_hypergraph(embeddings, k)` takes any embedding matrix directly. The
+binary variant of the construction is verified support-identical to the
+CRAN oracle `HyperG::knn_hypergraph()`.
+
+```{r knn}
+knn_hg <- text_hypergraph(
+  covid_abstracts,
+  column = "abstract",
+  id = "doc",
+  construction = "knn",
+  k = 10,
+  embeddings = covid_embeddings
+)
+knn_hg
+knn_clusters <- hg_cluster(knn_hg, k = 4, type = "random_walk", seed = 1)
+aggregate(node ~ cluster, data = knn_clusters, FUN = length)
+```
+
+Balanced groups — 41/41/37/46 — where the bag clustering of Stage 4 left
+one dominant 76-document residual: semantic neighborhoods spread
+structure more evenly than shared vocabulary. The two views agree only
+partially:
+
+```{r knn-vs-bag}
+table(knn = knn_clusters$cluster, bag = clusters$cluster)
+```
+
+Two themes are recovered by both constructions (the 32- and 37-document
+blocks); the rest reshuffles. Neither is "the" truth — shared vocabulary
+and semantic proximity are different questions — and a grouping stable
+across both is the one to trust. The choice of `k` gets its sensitivity
+check in `vignette("constructions")`: against `k = 15`, 143 of 165
+documents keep their cluster alignment; against `k = 5`, 125 do — robust
+upward, softer downward. And every number in this stage is conditional on
+one pinned encoder; a claim that matters should be re-run with a second
+model (`model =` makes that a one-argument change).
+
+# When to use which
+
+- **Bag, documents as nodes** — the default. Document clustering
+  (`hg_cluster`, `"random_walk"` whenever weights are tf-idf) and
+  few-label classification (`hg_classify`).
+- **Bag, words as nodes** — vocabulary structure: central terms
+  (`hg_centrality`), word communities.
+- **Window** — when order carries signal: phrase vocabulary,
+  collocations, sequence-like corpora. Words are the vertices; keep
+  corpora modest or filter hard.
+- **kNN** — when meaning matters more than word overlap:
+  paraphrase-heavy corpora, or as the explicit spectral alternative to
+  UMAP+HDBSCAN. Documents are the vertices; the geometry is the
+  encoder's, so say which encoder.
+- **`hg_measures` first, always** — density, participation, and the
+  node table say whether the spectral verbs are even applicable, and
+  which hubs will dominate them.
+- Everything is deterministic given a seed; every arbitrary choice
+  (stop list, `min_count`, `k`, `window`, `xi`, number of clusters) has
+  a one-argument sensitivity check — run it and report whether the
+  conclusion survives. The vignettes show each check on this corpus.
+
+# References
+
+Benson, A. R. (2019). Three hypergraph eigenvector centralities.
+*SIAM Journal on Mathematics of Data Science*, 1(2).
+
+Ding, K., Wang, J., Li, J., Li, D., & Liu, H. (2020). Be more with less:
+Hypergraph attention networks for inductive text classification.
+*EMNLP 2020*. doi:10.18653/v1/2020.emnlp-main.399.
+
+Hayashi, K., Aksoy, S. G., Park, C. H., & Park, H. (2020). Hypergraph
+random walks, Laplacians, and clustering. *CIKM 2020*.
+doi:10.1145/3340531.3412034.
+
+Manning, C. D., Raghavan, P., & Schütze, H. (2008). *Introduction to
+Information Retrieval*. Cambridge University Press.
+
+Zhou, D., Huang, J., & Schölkopf, B. (2006). Learning with hypergraphs:
+Clustering, classification, and embedding. *NeurIPS 2006*.

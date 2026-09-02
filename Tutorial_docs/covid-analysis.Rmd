@@ -1,0 +1,461 @@
+---
+title: "The covid_abstracts corpus, end to end"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 8,
+                      fig.height = 5, cache = FALSE)
+library(honets)
+okabe <- c("#E69F00", "#56B4E9", "#009E73", "#CC79A7",
+           "#0072B2", "#D55E00", "#F0E442", "#999999")
+```
+
+What is in the 165 COVID-era education abstracts bundled with
+honets -- which documents and words carry the corpus, how many
+topics it contains, what those topics are, and whether its structure is
+distinguishable from chance? Every step is one package verb; every claim
+in the prose restates a number computed in the chunk above it.
+
+## The corpus
+
+```{r}
+data(covid_abstracts)
+str(covid_abstracts)
+xtabs(~ year, data = covid_abstracts)
+```
+
+165 abstracts on education during and after COVID-19, with a Scopus id
+(`doc`), title, abstract text and year. Coverage is 40 abstracts per year
+for 2020--2023 and 5 from 2024: a balanced four-year window with a small
+tail.
+
+```{r years}
+barplot(xtabs(~ year, data = covid_abstracts), col = okabe[5],
+        border = NA, xlab = "Publication year", ylab = "Abstracts",
+        main = "Corpus coverage by year")
+```
+
+## From text to hypergraph
+
+The corpus becomes a document--word hypergraph: each abstract is a vertex,
+each word is a hyperedge joining every abstract that uses it, and the
+incidence weight is smoothed tf-idf, so a word counts for more in an
+abstract where it is frequent and rare elsewhere. English stop words are
+removed -- with them left in, "the" and "of" dominate every downstream
+table (verified; they swamp the keyword lists).
+
+```{r}
+hg <- text_hypergraph(covid_abstracts, column = "abstract", id = "doc",
+                      weight = "tfidf", stop_words = stop_words_en())
+hg
+```
+
+165 documents share 4,043 distinct words. Hyperedge sizes run from 1 (a
+word used in a single abstract) to 140 (a word used in almost every one),
+with median 1: most vocabulary is idiosyncratic, and a small core of
+words does the connecting.
+
+```{r structure}
+edges <- hg_measures(hg, what = "edges")
+nodes <- hg_measures(hg, what = "nodes")
+hg_measures(hg, what = "summary")
+```
+
+```{r degree-plots, fig.height = 4}
+par(mfrow = c(1, 2))
+hist(edges$size, breaks = 50, col = okabe[5], border = "white",
+     xlab = "Hyperedge size (documents per word)", main = "Words")
+hist(nodes$hyperdegree, breaks = 20, col = okabe[1], border = "white",
+     xlab = "Hyperdegree (distinct words per document)", main = "Documents")
+par(mfrow = c(1, 1))
+```
+
+Density 0.021 with pairwise participation 0.997: almost every pair of
+abstracts shares at least one word, so the corpus is one tightly connected
+component -- the regime where spectral methods are well defined. Documents
+use between roughly 50 and 200 distinct words each; the word-size
+distribution is the long-tailed one typical of text.
+
+## Which documents carry the corpus
+
+The Chitra & Raphael (2019) hypergraph random walk with edge-dependent
+vertex weights ranks documents by their stationary visiting probability:
+a document ranks high when it shares weighty vocabulary with many other
+well-connected documents.
+
+```{r}
+ranked <- hg_pagerank(hg, sort_by = "pagerank", n = 5)
+subset(merge(ranked, covid_abstracts, by.x = "node", by.y = "doc",
+             sort = FALSE),
+       select = c(pagerank, year, title))
+```
+
+The top document (PageRank 0.0160, 2022) is "Study of Resilience in
+Learning Environments During the Covid-19 Pandemic" -- a synthesis paper
+whose vocabulary bridges the corpus. The rest of the top five are the
+same kind of connector: online peer support, distance-learning
+perceptions, home physical education, digital library services. PageRank
+here reads as "most representative of the shared conversation", not "most
+cited".
+
+The tensor centralities (clique-expansion eigenvector, Z- and
+H-eigenvector) rank by a different mechanism -- nonlinear eigenvectors of
+the adjacency tensor rather than a random walk -- so agreement between
+them and PageRank is a convergence check, not a repetition.
+
+```{r}
+central <- hg_centrality(hg, sort_by = "Z", n = 5)
+subset(merge(central, covid_abstracts, by.x = "node", by.y = "doc",
+             sort = FALSE),
+       select = c(clique, Z, H, title))
+```
+
+The Z-eigenvector ranking puts the same resilience study first: two
+unrelated notions of importance agree on the corpus anchor, which makes
+the "most representative document" claim robust rather than
+method-dependent.
+
+A personalized walk restarts at a chosen document and ranks the rest by
+proximity to it -- the document's neighborhood rather than the global
+core.
+
+```{r}
+anchor <- head(hg_pagerank(hg, sort_by = "pagerank", n = 1), 1)$node
+neighborhood <- hg_pagerank(hg, personalized = anchor,
+                            sort_by = "pagerank", n = 6)
+subset(merge(neighborhood, covid_abstracts, by.x = "node", by.y = "doc",
+             sort = FALSE),
+       select = c(pagerank, title))
+```
+
+Around the resilience anchor the walk gathers self-directed learning,
+educational continuity in segregated schools, learning-from-home
+profiles, and institutional trust -- the resilience conversation
+specifically, not the corpus-wide online-teaching core.
+
+## Which words carry the corpus
+
+The dual hypergraph swaps roles -- words become vertices, documents become
+hyperedges -- so the same walk ranks vocabulary.
+
+```{r}
+dual <- dual_hypergraph(hg)
+top_words <- hg_pagerank(dual, sort_by = "pagerank", n = 12)
+top_words
+```
+
+```{r word-rank, fig.height = 5}
+barplot(rev(top_words$pagerank), names.arg = rev(top_words$node),
+        horiz = TRUE, las = 1, col = okabe[3], border = NA,
+        xlab = "PageRank in the dual hypergraph",
+        main = "The corpus core vocabulary")
+```
+
+The core is exactly what the corpus is about: *education*, *learning*,
+*students*, *online*, *teaching*, then *covid*, *teachers*, *pandemic*.
+No surprises is the correct outcome here -- the walk recovers the shared
+frame, and the interesting structure is what remains after it (the
+topics below).
+
+## How many topics
+
+The Hayashi et al. (2020) random-walk Laplacian uses the tf-idf incidence
+directly (edge-dependent vertex weights), which is the natural spectral
+operator for weighted text hypergraphs. Its eigenvalue gaps indicate how
+many clusters the spectrum supports.
+
+```{r scree, fig.height = 4.5}
+spectrum <- head(hg_cluster(hg, k = 2, seed = 1, type = "random_walk",
+                            what = "eigenvalues"), 20)
+plot(spectrum$index, spectrum$value, type = "b", pch = 19, col = okabe[5],
+     xlab = "Eigenvalue index", ylab = "Laplacian eigenvalue",
+     main = "Spectrum of the random-walk Laplacian (first 20)")
+abline(v = c(2, 4), lty = c(2, 3), col = okabe[6])
+head(spectrum, 10)
+```
+
+The gap after index 1 is the trivial connected-component gap. The largest
+non-trivial gap sits after index 2 (0.022): the coarsest reliable split is
+two clusters. Beyond it the spectrum rises smoothly to a mild shoulder
+around 8--9. The spectrum therefore supports anything from a coarse 2-way
+to a fine ~9-way partition; we analyze k = 4 as the finest resolution
+whose keyword sets stay distinct (sensitivity below), not because the
+eigengap alone demands it.
+
+## The topics
+
+```{r}
+topics <- hg_cluster(hg, k = 4, seed = 1, type = "random_walk")
+xtabs(~ cluster, data = topics)
+keywords <- hg_keywords(hg, topics, n = 8)
+keywords
+```
+
+```{r keyword-panel, fig.height = 8}
+par(mfrow = c(2, 2), mar = c(4, 7, 3, 1))
+panels <- split(keywords, keywords$cluster)
+invisible(Map(\(block, panel_col) {
+  barplot(rev(block$score), names.arg = rev(block$word), horiz = TRUE,
+          las = 1, col = panel_col, border = NA,
+          main = unique(block$cluster), xlab = "tf-idf mass in cluster")
+}, panels, head(okabe, length(panels))))
+par(mfrow = c(1, 1), mar = c(5, 4, 4, 2) + 0.1)
+```
+
+Reading the keyword panels, the four topics are:
+
+- **Cluster 2 (80 abstracts) -- schools and teachers.** *learning,
+  education, teachers, school*: the general remote-schooling literature,
+  the corpus's center of mass.
+- **Cluster 1 (44) -- online higher and clinical education.** *students,
+  online, clinical, dental*: professional and university programs moving
+  their practical teaching online.
+- **Cluster 3 (27) -- systems and resilience.** *system, social,
+  resilience, challenges*: the policy and systems view of educational
+  disruption.
+- **Cluster 4 (14) -- science and public trust.** *science, trust,
+  reality, harms*: science education and the public-understanding strand.
+
+The `share` column separates heavy from distinctive vocabulary: a word
+with share near 1 (e.g. *dental*, *resilience*, *trust* in their
+clusters) belongs almost entirely to that topic.
+
+```{r sensitivity}
+hg_keywords(hg, hg_cluster(hg, k = 3, seed = 1, type = "random_walk"),
+            n = 6, collapse = TRUE)
+hg_keywords(hg, hg_cluster(hg, k = 2, seed = 1, type = "random_walk"),
+            n = 6, collapse = TRUE)
+hg_stability(hg, k = 4, type = "random_walk")
+```
+
+Sensitivity: at k = 3 the science-and-trust topic is already separate and
+the two education clusters merge their boundary; at k = 2 the split is
+online-teaching versus everything else. The four-topic reading survives
+the resolution choice, and `hg_stability()` confirms the k = 4 partition
+is identical across k-means seeds (adjusted Rand 1).
+
+## The topic map
+
+The clustering's own spectral embedding places every abstract in the
+plane; plotting it colored and shaped by topic shows how separated the
+topics actually are.
+
+```{r topic-map, fig.height = 6}
+emb <- hg_cluster(hg, k = 4, seed = 1, type = "random_walk",
+                  what = "embedding")
+styles <- data.frame(cluster = sort(unique(emb$cluster)),
+                     color = head(okabe, 4), pch = c(19, 17, 15, 18))
+emb_styled <- merge(emb, styles, by = "cluster")
+plot(emb_styled$dim2, emb_styled$dim3, col = emb_styled$color,
+     pch = emb_styled$pch,
+     xlab = "Spectral dimension 2", ylab = "Spectral dimension 3",
+     main = "Documents in the Laplacian eigenspace")
+legend("topright", legend = styles$cluster, col = styles$color,
+       pch = styles$pch, bty = "n")
+```
+
+The map matches the sizes: the large schools cluster forms the dense
+center, the online/clinical cluster separates along one axis, and the
+two small topics (resilience; science and trust) sit at the periphery --
+distinct but connected, which is why the corpus stays one component.
+
+## Word communities, and an honest negative
+
+The `nodes = "word"` orientation makes words the vertices and documents
+the hyperedges, so the same clustering machinery can look for word
+communities directly.
+
+```{r}
+whg <- text_hypergraph(covid_abstracts, column = "abstract", id = "doc",
+                       weight = "tfidf", stop_words = stop_words_en(),
+                       nodes = "word", sparse = TRUE)
+whg
+word_emb <- hg_cluster(whg, k = 4, seed = 1, what = "embedding")
+xtabs(~ cluster, data = word_emb)
+strata <- hg_seeds(word_emb, n = 8)
+aggregate(word ~ cluster,
+          data = data.frame(word = names(strata), cluster = strata),
+          paste, collapse = ", ")
+```
+
+This one earns a negative interpretation: with hyperedges of size 36 to
+161 (documents are large word sets), the word clusters are frequency
+strata -- one 2,987-word background cluster and three bands of common
+vocabulary -- not topics. On this corpus the informative direction is
+documents-as-vertices with `hg_keywords()` on top, and reporting that is
+more useful than pretending both directions always work.
+
+## Order matters: the windowed construction
+
+The bag construction discards word order. The windowed construction
+(HyperGAT-style sequential hyperedges) keeps it: every sliding window of
+`window` consecutive tokens becomes a hyperedge, so a word's degree
+counts its distinct local contexts.
+
+```{r}
+anchor_text <- subset(covid_abstracts, doc == anchor)
+win <- text_hypergraph(anchor_text, column = "abstract", id = "doc",
+                       construction = "window", window = 3,
+                       stop_words = stop_words_en())
+win
+head(hg_measures(win, what = "nodes"), 5)
+```
+
+The anchor abstract alone yields 161 word vertices in 252 distinct
+3-token windows. This construction is the right input when sequence
+carries meaning (collocations, phrase structure); for corpus-level topic
+work the bag is the right grain, which is why the rest of this analysis
+uses it.
+
+## Does the semantic view agree?
+
+The bag construction sees shared vocabulary. The kNN construction sees
+shared meaning: each abstract's sbert embedding becomes a hyperedge
+joining its ten nearest neighbors (`covid_embeddings` ships with the
+package). Clustering both hypergraphs the same way asks whether lexical
+and semantic topic structure coincide.
+
+```{r}
+data(covid_embeddings)
+khg <- knn_hypergraph(covid_embeddings, k = 10)
+sem_topics <- hg_cluster(khg, k = 4, seed = 1, type = "random_walk")
+hg_agreement(topics, sem_topics, what = "table")
+hg_agreement(topics, sem_topics)
+```
+
+Agreement is real but partial (the label names of two independent
+clusterings are arbitrary, so the adjusted Rand index `ari` is the
+statistic to read). The resilience topic maps almost entirely
+onto one semantic cluster (15 of 27) and the schools topic onto another
+(32 of 80), while the large lexical clusters split across semantic ones:
+abstracts that use different vocabulary for the same theme are pulled
+together by the embeddings, and vice versa. The two constructions are
+complementary lenses, not redundant ones -- which is the reason the
+package ships both.
+
+## Is the structure real?
+
+A degree-preserving null model (Gotelli 2000 checkerboard swaps) keeps
+every document's word count and every word's document count while
+shuffling who uses what. If the observed overlap structure survives in
+the null, the "topics" would be a degree artifact.
+
+```{r null}
+null_fit <- hg_null_test(hg, n = 99, seed = 1)
+null_fit
+```
+
+Two statistics are invariant under the swap null by construction --
+density and average edge size preserve both margins, and their unchanged
+values (z = NA) are the built-in falsification check that the chain
+preserves what it must. Pairwise participation is indistinguishable from
+the null (0.9973 observed vs 0.9974, z = -0.64, p = 0.66): nearly every
+pair of abstracts shares a word whether or not topics exist, so that
+statistic carries no topical signal in a corpus this dense. The signal is
+in the average Jaccard overlap between words: 0.00873 observed against a
+null of 0.00867 [0.00865, 0.00871], z = 3.32, p = 0.01. Words co-occur in
+the same documents more than their frequencies alone require -- exactly
+the excess the topic clustering above exploits. The structure is real.
+
+## From topics to labels: spreading
+
+With the topics named, transductive spreading (`hg_classify`) can label
+the rest of the corpus from a handful of examples per topic.
+`hg_seeds()` turns the clustering into those examples (the most
+representative documents per topic by stationary probability), and
+`hg_agreement()` scores each fit against the full partition. How many
+examples are enough here?
+
+```{r}
+pool <- hg_cluster(hg, k = 4, seed = 1, type = "random_walk",
+                   what = "embedding")
+do.call(rbind, lapply(c(2, 5, 10), \(m)
+  cbind(seeds_per_topic = m,
+        hg_agreement(hg_classify(hg, labels = hg_seeds(pool, n = m),
+                                 type = "random_walk",
+                                 normalization = "class_mass"),
+                     topics))))
+```
+
+With five labeled abstracts per topic, spreading reproduces 63% of the
+full unsupervised partition; with two per topic it manages only 47% --
+no better than always predicting the largest topic (80 of 165 is 48%) --
+and with ten it reaches 70%. On a small, densely connected corpus, label
+spreading needs a genuine seed base: a handful is not enough, and this
+sensitivity belongs next to any spread labels a report presents.
+
+## The neural tier on a small corpus
+
+`hg_neural()` trains an HGNN (Feng et al. 2019) on the same hypergraph;
+its propagation operator is exactly the spreading operator above, with
+learned filters. Training is stochastic, so the sbert-feature run is
+repeated over three torch seeds (house rule: a single-seed result is not
+a finding). The same 20 seed labels as the five-per-topic spreading run.
+
+```{r neural}
+data(covid_embeddings)
+seeds20 <- hg_seeds(pool, n = 5)
+hg_agreement(hg_neural(hg, labels = seeds20, hidden = 32, epochs = 300,
+                       seed = 1, validation = 0), topics)
+sbert_runs <- do.call(rbind, lapply(1:3, \(s)
+  cbind(method = "hg_neural (sbert)", torch_seed = s,
+        hg_agreement(hg_neural(hg, labels = seeds20,
+                               features = covid_embeddings, hidden = 32,
+                               epochs = 300, seed = s, validation = 0),
+                     topics))))
+sbert_runs
+aggregate(agreement ~ method, data = sbert_runs, mean)
+```
+
+The verdict is clear and worth stating plainly: with 20 labels on 165
+documents, the neural classifier loses to closed-form spreading.
+Bag-of-words features reach 31% agreement (a 130k-parameter first layer
+cannot be estimated from 20 examples), sbert features average 52% with
+a seed-to-seed range of 38-63%, and `hg_classify` delivered a stable 63%
+with no training at all. This mirrors the package's full benchmark study
+(see the pkgdown benchmarks article): the neural tier earns its keep
+with thousands of labels (`hg_hypergat` R8 0.9665, R52 0.9433;
+`hg_neural` R8 0.954), not dozens. `hg_hypergat` -- dual-attention
+document-level hypergraphs, run on this same corpus and seed set in
+the covid case study -- averages 45% over three torch seeds here, so
+few-label work belongs to `hg_classify`.
+
+## When to use which
+
+For a corpus of this size and shape: `hg_pagerank` (global and
+personalized, plus its dual) and `hg_centrality` for representative
+documents and core vocabulary, with agreement between the walk and the
+tensor rankings as the robustness check; `hg_cluster` with
+`type = "random_walk"` plus `hg_keywords` for topics, always with an
+eigengap look (`what = "eigenvalues"`) and an `hg_stability()` check before
+trusting a partition; `knn_hypergraph` on sbert embeddings as the
+semantic cross-check; the `nodes = "word"` orientation and the windowed
+construction when word communities or word order are the question --
+knowing that on a dense corpus the word orientation may only find
+frequency strata; `hg_null_test` before claiming any of it is structure;
+`hg_seeds` + `hg_classify` for few-label work, scored with
+`hg_agreement`; and `hg_neural` only when labels
+number in the hundreds or more. All of it is one connected pipeline on
+objects built by `text_hypergraph()`.
+
+## References
+
+Chitra, U., & Raphael, B. (2019). Random walks on hypergraphs with
+edge-dependent vertex weights. *ICML 36*.
+
+Feng, Y., You, H., Zhang, Z., Ji, R., & Gao, Y. (2019). Hypergraph
+neural networks. *AAAI 33*.
+
+Gotelli, N. J. (2000). Null model analysis of species co-occurrence
+patterns. *Ecology*, 81(9).
+
+Hayashi, K., Aksoy, S., Park, C., & Park, H. (2020). Hypergraph random
+walks, Laplacians, and clustering. *CIKM 29*.
+
+Zhou, D., Huang, J., & Scholkopf, B. (2006). Learning with hypergraphs:
+Clustering, classification, and embedding. *NeurIPS 19*.

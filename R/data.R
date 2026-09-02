@@ -1,6 +1,6 @@
-# Bundled example data, shared with Nestimate and hypernets (same .rda
-# files, same provenance); bundled here so higher-order examples,
-# inference, and tutorials run on real coded sequences.
+# Bundled example data, shared with Nestimate (same .rda files, same
+# provenance); bundled here so higher-order examples, inference, and
+# tutorials run on real coded sequences.
 
 #' Human-AI Vibe Coding Interaction Data (Long Format)
 #'
@@ -8,9 +8,15 @@
 #' projects, in long format: `human_long` holds the human turns (10,796
 #' rows), `ai_long` the AI turns (8,551 rows). Each session's ordered
 #' codes form one categorical sequence, which makes the pair a natural
-#' two-cohort input for the higher-order verbs — e.g.
+#' two-cohort input for the higher-order verbs -- e.g.
 #' `bootstrap_hon(human_long, action = "code", actor = "session_id",
 #' time = "timestamp")` or `compare_hon(human_long, ai_long, ...)`.
+#'
+#' The same data feed all three structure families: the ordered codes are
+#' sequences for the memory family, a session is a natural hyperedge over
+#' the codes that co-occur in it ([group_hypergraph()]), and a fitted
+#' memory network becomes a pathway complex for the simplicial family
+#' ([build_simplicial()] with `type = "pathway"`).
 #'
 #' @format Data frames in long format with 9 columns:
 #' \describe{

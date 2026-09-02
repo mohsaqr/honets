@@ -4,29 +4,106 @@
 \name{honets-package}
 \alias{honets}
 \alias{honets-package}
-\title{honets: Higher-Order Network Analysis from Sequence Data}
+\title{honets: Higher-Order Network Analysis}
 \description{
-Build and analyze higher-order networks from categorical sequence data:
-higher-order networks with rule extraction (HON), higher-order network
-embedding (HONEM), hypergeometric path anomaly detection (HYPA), the
-multi-order generative model (MOGen), a permutation-based Markov order
-test, and a per-context path-dependence diagnostic.
+A higher-order network is one in which a relation reaches beyond a single
+pair of nodes at a single moment: either it \emph{binds more than two nodes at
+once}, or it \emph{depends on more than the current node}. The literature
+(Battiston et al. 2020; Bianconi 2021) organizes that idea into three
+structure families, and honets implements all three behind one taxonomy.
 }
-\details{
-honets is the home package for the variable-order Markov / path-statistics
-paradigm in the Nestimate family: Nestimate delegates its higher-order
-verbs here and re-exports them, so the two surfaces stay identical.
+\section{The three families}{
+
+
+\describe{
+\item{\strong{Memory networks}}{A node is a state \emph{plus the memory of how it
+was reached}, so a relation depends on history rather than only on the
+present state. Built from categorical sequences.
+Constructors \code{\link[=build_hon]{build_hon()}}, \code{\link[=build_honem]{build_honem()}}, \code{\link[=build_hypa]{build_hypa()}},
+\code{\link[=build_mogen]{build_mogen()}}; diagnostics \code{\link[=markov_order_test]{markov_order_test()}},
+\code{\link[=path_dependence]{path_dependence()}}; inference \code{\link[=bootstrap_hon]{bootstrap_hon()}}, \code{\link[=compare_hon]{compare_hon()}};
+measures \code{\link[=hon_centrality]{hon_centrality()}}.}
+\item{\strong{Simplicial complexes}}{A relation is a set of nodes that are
+\emph{all} mutually related, together with every one of its subsets, which
+gives the object a geometry and hence a topology.
+Constructor \code{\link[=build_simplicial]{build_simplicial()}}; measures \code{\link[=betti_numbers]{betti_numbers()}},
+\code{\link[=euler_characteristic]{euler_characteristic()}}, \code{\link[=simplicial_degree]{simplicial_degree()}}, \code{\link[=q_analysis]{q_analysis()}};
+topology \code{\link[=persistent_homology]{persistent_homology()}}, \code{\link[=persistence_landscape]{persistence_landscape()}},
+\code{\link[=bottleneck_distance]{bottleneck_distance()}}.}
+\item{\strong{Hypergraphs}}{A relation is an arbitrary set of nodes bound as
+a unit, with no requirement that its subsets also be relations.
+Constructors \code{\link[=build_hypergraph]{build_hypergraph()}}, \code{\link[=window_hypergraph]{window_hypergraph()}},
+\code{\link[=group_hypergraph]{group_hypergraph()}}; measures \code{\link[=hypergraph_measures]{hypergraph_measures()}},
+\code{\link[=hypergraph_centrality]{hypergraph_centrality()}}; spectral methods \code{\link[=hypergraph_laplacian]{hypergraph_laplacian()}},
+\code{\link[=hypergraph_cluster]{hypergraph_cluster()}}, \code{\link[=hypergraph_transduction]{hypergraph_transduction()}}; PageRank
+\code{\link[=hg_pagerank]{hg_pagerank()}}; projections \code{\link[=clique_expansion]{clique_expansion()}}, \code{\link[=hg_project]{hg_project()}},
+\code{\link[=hg_line_graph]{hg_line_graph()}}, \code{\link[=dual_hypergraph]{dual_hypergraph()}}; hyperedge tables \code{\link[=hg_edges]{hg_edges()}};
+null models \code{\link[=hg_null_test]{hg_null_test()}}; neural networks \code{\link[=hg_neural]{hg_neural()}},
+\code{\link[=hg_hypergat]{hg_hypergat()}}; embedding constructor \code{\link[=knn_hypergraph]{knn_hypergraph()}}.}
+\item{\strong{Text hypergraphs}}{A corpus is a bipartite document-word
+structure, which is a hypergraph in either orientation: documents as
+nodes bound by shared words, or words as nodes bound by shared
+documents. Constructor \code{\link[=text_hypergraph]{text_hypergraph()}} (bag of words, token
+windows, or embedding nearest neighbours); tidy verbs
+\code{\link[=hg_measures]{hg_measures()}}, \code{\link[=hg_centrality]{hg_centrality()}}, \code{\link[=hg_cluster]{hg_cluster()}}, \code{\link[=hg_keywords]{hg_keywords()}},
+\code{\link[=hg_classify]{hg_classify()}}, \code{\link[=hg_stability]{hg_stability()}}, \code{\link[=hg_agreement]{hg_agreement()}}, \code{\link[=hg_seeds]{hg_seeds()}}.
+Every verb also accepts any \code{net_hypergraph}.}
+}
+}
+
+\section{Verb grammar}{
+
+
+The same naming rules hold across all three families:
+
+\describe{
+\item{\verb{build_*()}}{Constructors. Always return an object of class
+\verb{net_*}. Where a family admits several construction routes, they are
+selected with \verb{type =}, never with a differently named argument.}
+\item{\verb{*_centrality()}, \verb{*_measures()}, \verb{*_degree()}}{Measures. Always
+return a tidy \code{data.frame}, one row per node or per structure.}
+\item{\verb{bootstrap_*()}, \verb{compare_*()}, \verb{*_test()}}{Inference. Return a
+\verb{net_*} result object carrying estimates, intervals and p-values.}
+\item{\code{print()}, \code{summary()}, \code{plot()}, \code{as.data.frame()}}{Every \verb{net_*}
+result object supports all four. \code{as.data.frame()} is the tidy
+accessor -- reaching into a result with \code{$} is never required, and a
+secondary table is selected with \verb{what =}.}
+}
+}
+
+\section{Crossing between families}{
+
+
+The families are entry points into one another, not islands. The text
+family is the corpus front end of the hypergraph family: a
+\code{text_hypergraph} \emph{is} a \code{net_hypergraph}, so every hypergraph verb takes
+it, and every \verb{hg_*()} verb takes any \code{net_hypergraph} in return.
+\code{\link[=build_simplicial]{build_simplicial()}} with \code{type = "pathway"} turns a memory network into a
+simplicial complex; \code{\link[=window_hypergraph]{window_hypergraph()}} turns the same sequences into a
+hypergraph; \code{\link[=clique_expansion]{clique_expansion()}} projects a hypergraph back to a pairwise
+network that any of the first-order tools accept. \code{\link[=pathways]{pathways()}} is the
+shared accessor that hands sequence-derived path strings from the memory
+family to the other two.
+}
+
+\references{
+Battiston, F., Cencetti, G., Iacopini, I., Latora, V., Lucas, M.,
+Patania, A., Young, J.-G., & Petri, G. (2020). Networks beyond pairwise
+interactions: Structure and dynamics. \emph{Physics Reports}, 874, 1-92.
+
+Bianconi, G. (2021). \emph{Higher-Order Networks}. Cambridge University Press.
 }
 \seealso{
 Useful links:
 \itemize{
   \item \url{https://github.com/mohsaqr/honets}
+  \item \url{https://mohsaqr.github.io/honets}
   \item Report bugs at \url{https://github.com/mohsaqr/honets/issues}
 }
 
 }
 \author{
-\strong{Maintainer}: Mohammed Saqr \email{saqr@saqr.me} [copyright holder]
+\strong{Maintainer}: Mohammed Saqr \email{saqr@saqr.me} (\href{https://orcid.org/0000-0001-5881-3109}{ORCID}) [copyright holder]
 
 }
 \keyword{internal}

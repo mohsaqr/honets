@@ -1,0 +1,545 @@
+---
+title: "COVID-19 education research: a hypergraph case study against a published synthesis"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 8,
+                      fig.height = 5, cache = FALSE)
+library(honets)
+okabe <- c("#E69F00", "#56B4E9", "#009E73", "#CC79A7",
+           "#0072B2", "#D55E00", "#F0E442", "#999999")
+```
+
+Saqr et al. (2024) synthesized COVID-19 education research from 4,201
+Scopus articles with structural topic modeling (STM): they estimated 40
+candidate models between 5 and 45 topics, ranked them by semantic
+coherence and exclusivity, and had four experts adjudicate the final
+solution -- sixteen topics, organized into three groups (education
+related, distance/online education, and diverse issues), with *online
+education* the most prevalent topic (14.6%). The corpus bundled with
+this package, `covid_abstracts`, is a 165-abstract stratified sample
+from a Scopus export of the same research field. That pairing sets up a
+complete case study: run the package's entire pipeline on the sample --
+construction, null test, centrality, several topic solutions, keyword
+mapping, temporal drift, a semantic cross-check, and the full
+classification cascade -- and test how much of the published structure
+a 4% sample recovers without a human in the model-selection loop. Every
+number in the prose is computed in the chunk above it.
+
+## The corpus
+
+```{r}
+data(covid_abstracts)
+str(covid_abstracts)
+xtabs(~ year, data = covid_abstracts)
+```
+
+165 abstracts with Scopus id, title, text and year: 40 per year for
+2020--2023 and 5 from 2024. The published study covered 2019--2021
+(mostly 2021), so the sample extends past the paper's window -- a
+difference to keep in mind when prevalences are compared below.
+
+## Construction, and whether the structure is real
+
+Each abstract becomes a vertex; each word becomes a hyperedge joining
+every abstract that uses it, weighted by smoothed tf-idf; English stop
+words are removed.
+
+```{r}
+hg <- text_hypergraph(covid_abstracts, column = "abstract", id = "doc",
+                      weight = "tfidf", stop_words = stop_words_en())
+hg
+hg_measures(hg, what = "summary")
+```
+
+165 documents share 4,043 distinct words at density 0.021, and pairwise
+participation 0.997 says almost every pair of abstracts shares at least
+one word: one tightly connected component, the regime where the
+spectral machinery below is well defined.
+
+Before estimating any topics, the null test asks whether the overlap
+structure is distinguishable from what the word and document
+frequencies alone would produce. The degree-preserving swap null
+(Gotelli 2000) keeps every margin fixed and shuffles who uses what.
+
+```{r null}
+hg_null_test(hg, n = 99, seed = 1)
+```
+
+Density and average edge size are invariant under the swaps (z = NA) --
+the built-in check that the chain preserves what it must. Pairwise
+participation is at its null value (z = -0.64, p = 0.66): in a corpus
+this dense, "abstracts share words" carries no topical signal. The
+signal is in the average Jaccard overlap between words: 0.00873
+observed against a null of 0.00867, z = 3.32, p = 0.01. Words co-occur
+in the same documents more than their frequencies require -- the excess
+that topic estimation exploits. The structure is real, so estimating
+topics from it is justified.
+
+## The shared frame before the topics
+
+The paper motivates STM by noting that frequent-keyword analysis is
+dominated by a few generic terms that swamp the themes. The same
+phenomenon is directly visible here: ranking words by the Chitra &
+Raphael (2019) hypergraph random walk on the dual hypergraph (words as
+vertices, documents as hyperedges) recovers the corpus frame, not its
+topics.
+
+```{r}
+dual <- dual_hypergraph(hg)
+hg_pagerank(dual, sort_by = "pagerank", n = 8)
+```
+
+*education, learning, students, online, teaching, covid, teachers,
+pandemic* -- the vocabulary every abstract shares. This is the
+frequent-words problem the paper describes, reproduced as a
+measurement; everything topical lives below this frame, which is what
+the clustering has to extract.
+
+The same walk on the primary hypergraph ranks documents, and the
+adjacency-tensor centralities (clique-expansion, Z- and H-eigenvector)
+rank them by an unrelated nonlinear mechanism, so agreement is a
+convergence check:
+
+```{r}
+subset(merge(hg_pagerank(hg, sort_by = "pagerank", n = 3),
+             covid_abstracts, by.x = "node", by.y = "doc", sort = FALSE),
+       select = c(pagerank, year, title))
+subset(merge(hg_centrality(hg, sort_by = "Z", n = 3),
+             covid_abstracts, by.x = "node", by.y = "doc", sort = FALSE),
+       select = c(Z, title))
+```
+
+Both mechanisms put the same document first -- a 2022 resilience
+synthesis whose vocabulary bridges the corpus -- so "most
+representative abstract" is a robust designation, not a
+method-dependent one.
+
+## How many topics can 165 abstracts support?
+
+The paper needed 40 candidate models and four experts to choose its
+topic count. The spectral route asks the data directly: the eigenvalue
+gaps of the Hayashi et al. (2020) random-walk Laplacian indicate how
+many clusters the spectrum supports.
+
+```{r scree, fig.height = 4.5}
+spectrum <- head(hg_cluster(hg, k = 2, seed = 1, type = "random_walk",
+                            what = "eigenvalues"), 20)
+plot(spectrum$index, spectrum$value, type = "b", pch = 19, col = okabe[5],
+     xlab = "Eigenvalue index", ylab = "Laplacian eigenvalue",
+     main = "Spectrum of the random-walk Laplacian (first 20)")
+abline(v = c(2, 4, 8), lty = c(2, 3, 3), col = okabe[6])
+head(spectrum, 10)
+```
+
+The largest non-trivial gap sits after index 2 (0.022), with a mild
+shoulder around 8--9: the spectrum supports anything from a coarse
+2-way split to roughly nine clusters, and nothing suggests sixteen.
+The decisive evidence is stability -- a partition that changes with the
+k-means seed is not a finding:
+
+```{r stability}
+hg_stability(hg, k = c(3, 4, 8, 16), type = "random_walk")
+```
+
+k = 3, 4 and 8 reproduce exactly across seeds (adjusted Rand 1). At
+k = 16 -- the published resolution -- the partition changes with the
+seed (adjusted Rand 0.72): with about ten documents per cluster, the
+sixteen-topic solution is not estimable from this sample. That is the
+first result of the case study: the paper's fine resolution needs the
+paper's corpus size, and the sample's ceiling is about eight topics.
+Sixteen clusters on 165 documents also shows *how* overfitting looks
+in keyword space:
+
+```{r}
+topics16 <- hg_cluster(hg, k = 16, seed = 1, type = "random_walk")
+hg_keywords(hg, topics16, n = 4, collapse = TRUE)
+```
+
+Several of these are single-paper shards (*sputum, gamification*;
+*superintendents, business*) rather than themes -- exactly what the
+seed instability warns about.
+
+## Several solutions: three, four, eight
+
+The three stable resolutions, coarse to fine:
+
+```{r}
+topics3 <- hg_cluster(hg, k = 3, seed = 1, type = "random_walk")
+xtabs(~ cluster, data = topics3)
+hg_keywords(hg, topics3, n = 6, collapse = TRUE)
+```
+
+At k = 3 the split is *online teaching and learning* (83 abstracts),
+*education during the pandemic in general* (62), and *science,
+politics and trust* (20).
+
+```{r}
+topics4 <- hg_cluster(hg, k = 4, seed = 1, type = "random_walk")
+xtabs(~ cluster, data = topics4)
+hg_keywords(hg, topics4, n = 6, collapse = TRUE)
+```
+
+At k = 4 the online cluster sheds a distinct *clinical and dental
+education* topic (44) and a *systems and resilience* topic (27)
+separates from the general one. The finest stable solution:
+
+```{r}
+topics8 <- hg_cluster(hg, k = 8, seed = 1, type = "random_walk")
+xtabs(~ cluster, data = topics8)
+keywords8 <- hg_keywords(hg, topics8, n = 6)
+keywords8
+```
+
+```{r keyword-panel, fig.height = 9}
+par(mfrow = c(4, 2), mar = c(4, 8, 3, 1))
+panels <- split(keywords8, keywords8$cluster)
+invisible(Map(\(block, panel_col) {
+  barplot(rev(block$score), names.arg = rev(block$word), horiz = TRUE,
+          las = 1, col = panel_col, border = NA,
+          main = unique(block$cluster), xlab = "tf-idf mass in cluster")
+}, panels, head(okabe, length(panels))))
+par(mfrow = c(1, 1), mar = c(5, 4, 4, 2) + 0.1)
+```
+
+## The eight topics against the published sixteen
+
+Reading the keyword panels against Table 3 of the paper gives a direct
+mapping. Each recovered cluster is assigned the published topic whose
+characteristic words it shares, and through the paper's own grouping,
+one of the three published groups. (The paper reports sixteen topics;
+its Table 3 as printed lists seventeen labeled rows, and the group
+assignments below follow that table.)
+
+```{r}
+mapping <- data.frame(
+  cluster = paste("Cluster", 1:8),
+  keywords = c("clinical, dental, graduates", "parents, school, leadership",
+               "children, anxiety, perceived", "cov, sars, distance",
+               "online, learning, teaching", "health, global, mobility",
+               "learning, education, system", "science, trust, political"),
+  published_topic = c("Medical Education", "School closure / Teachers",
+                      "Well-being", "Emergency / Remote education",
+                      "Online education", "Higher education",
+                      "Education", "(no published counterpart)"),
+  published_group = c("diverse", "distance", "diverse", "distance",
+                      "distance", "education", "education", "diverse")
+)
+sizes8 <- aggregate(node ~ cluster, data = topics8, length)
+names(sizes8) <- c("cluster", "n_abstracts")
+merge(mapping, sizes8, by = "cluster", sort = FALSE)
+```
+
+Seven of the eight recovered topics have a clear published
+counterpart. The correspondences are specific, not generic: the
+*clinical, dental* cluster is the paper's Medical Education topic
+(which the paper singles out for the dominance of medical-education
+journals in its venue analysis); the *children, anxiety* cluster is
+its Well-being topic; the *cov, sars, distance* cluster is the
+emergency-response strand; *parents, school, leadership* matches the
+school-closure and teachers topics; and the largest recovered cluster
+-- *online, learning, teaching*, 41 of 165 abstracts -- is Online
+education, which is also the paper's most prevalent topic. The one
+cluster without a counterpart, *science, trust, political* (public
+trust in science), is a strand this 2020--2024 sample contains that
+the paper's mostly-2021 corpus did not surface as a topic of its own.
+
+## Prevalence: the sample against the published corpus
+
+The cluster-to-topic mapping is interpretive, but the topic-to-group
+assignment comes from the paper itself, so aggregating both sides to
+the three published groups gives a fair quantitative comparison. The
+published prevalences (paper, Fig. 2):
+
+```{r}
+published <- data.frame(
+  topic = c("Online education", "Emerging technologies",
+            "Higher education", "Emergency education", "Education",
+            "Remote education", "Teachers", "Medical Education",
+            "University", "Curriculum", "Well-being", "Equality",
+            "Engagement and motivation", "Perceptions",
+            "Higher education institutions", "Inclusion",
+            "School closure"),
+  group = c("distance", "diverse", "education", "distance", "education",
+            "distance", "distance", "diverse", "education", "education",
+            "diverse", "diverse", "diverse", "diverse", "education",
+            "diverse", "distance"),
+  prevalence = c(14.6, 11.3, 9.1, 8.6, 7.4, 6.2, 6.1, 5.5, 5.5, 4.3,
+                 4.0, 3.8, 3.7, 2.5, 2.4, 2.4, 2.4)
+)
+published_groups <- aggregate(prevalence ~ group, data = published, sum)
+published_groups
+```
+
+```{r}
+ours <- merge(mapping, sizes8, by = "cluster")
+our_groups <- within(
+  aggregate(n_abstracts ~ published_group, data = ours, sum),
+  share <- round(100 * n_abstracts / sum(n_abstracts), 1)
+)
+our_groups
+```
+
+```{r prevalence-plot, fig.height = 4.5}
+comparison <- merge(published_groups, our_groups,
+                    by.x = "group", by.y = "published_group")
+bars <- t(cbind(published = comparison$prevalence,
+                sample = comparison$share))
+barplot(bars, beside = TRUE, names.arg = comparison$group,
+        col = okabe[c(5, 1)], border = NA, ylab = "Share of corpus (%)",
+        main = "Topic-group prevalence: published STM vs hypergraph sample",
+        legend.text = c("Published (STM, n = 4,201)",
+                        "This sample (hypergraph, n = 165)"),
+        args.legend = list(bty = "n"))
+```
+
+The group-level prevalences agree to within about five points:
+education-related 29.7% here against 28.7% published, distance/online
+43.0% against 37.9%, diverse issues 27.3% against 33.2%. Two corpora,
+two methods, a 25-fold size difference -- and the same macro-structure,
+with distance/online education the largest group in both. The
+divergences are also interpretable: the sample slightly overweights
+distance/online (its 2022--2024 tail keeps online-learning vocabulary
+prevalent) and underweights diverse issues, where the paper's
+*Emerging technologies* topic (11.3%) has no counterpart cluster here.
+
+## Topics over time
+
+The sample spans 2020--2024, two years past the paper's window, so it
+can ask what happened to the topics after the emergency. Shares by year
+at the k = 4 resolution (the yearly counts are too small to carry a
+formal test at k = 8, so this is a descriptive read):
+
+```{r drift, fig.height = 4.5}
+by_year <- merge(topics4, covid_abstracts, by.x = "node", by.y = "doc")
+year_share <- proportions(xtabs(~ cluster + year, data = by_year),
+                          margin = 2)
+round(year_share, 2)
+matplot(colnames(year_share), t(year_share), type = "b", lty = 1,
+        pch = c(19, 17, 15, 18), col = head(okabe, 4),
+        xlab = "Publication year", ylab = "Share of that year's abstracts",
+        main = "Topic shares by year (k = 4)")
+legend("topleft", legend = rownames(year_share), col = head(okabe, 4),
+       pch = c(19, 17, 15, 18), lty = 1, bty = "n")
+```
+
+The online clinical/higher-education cluster falls from 35% of 2020
+abstracts to 20% by 2022, while the general schools-and-teachers
+cluster rises from 40% to 55%: the literature moves from emergency
+online delivery toward broader reflection. The k = 8 emergency cluster
+makes the same point more sharply --
+
+```{r}
+by_year8 <- merge(topics8, covid_abstracts, by.x = "node", by.y = "doc")
+xtabs(~ year, data = subset(by_year8, cluster == "Cluster 4"))
+```
+
+-- nine of its seventeen abstracts are from 2020, the front-loaded
+crisis-response strand the paper describes as the initial reaction.
+(2024 contributes only five abstracts; its shares are not
+interpretable.)
+
+## Does the semantic construction agree?
+
+The tf-idf construction sees shared vocabulary. The kNN construction
+sees shared meaning: each abstract's sbert embedding becomes a
+hyperedge joining its ten nearest neighbors. Clustering both the same
+way, at both stable coarse resolutions, measures how much the two
+notions of topic coincide. Because the two clusterings' label names
+are arbitrary, the adjusted Rand index (the `ari` column) is the
+statistic to read.
+
+```{r}
+data(covid_embeddings)
+khg <- knn_hypergraph(covid_embeddings, k = 10)
+sem3 <- hg_cluster(khg, k = 3, seed = 1, type = "random_walk")
+hg_agreement(topics3, sem3, what = "table")
+sem4 <- hg_cluster(khg, k = 4, seed = 1, type = "random_walk")
+rbind(cbind(k = 3, hg_agreement(topics3, sem3)),
+      cbind(k = 4, hg_agreement(topics4, sem4)))
+```
+
+Agreement is close to zero (adjusted Rand 0.04 at k = 3, 0.08 at
+k = 4). That is a finding, not a failure: on this corpus the lexical
+and semantic constructions partition the documents along genuinely
+different lines -- shared terminology versus embedding proximity --
+and a report should say which lens its topics come from. The published
+STM, a bag-of-words method, sits on the lexical side; the comparison
+above is with the matching construction.
+
+## Scaling the topics to labels: the full cascade
+
+The paper's qualitative phase hand-coded 54 top-cited papers. The
+package's transductive and neural verbs automate exactly that step:
+label a few documents per topic, spread to the rest. `hg_seeds()`
+turns the clustering into those labels -- the `n` most representative
+abstracts per topic by stationary probability. With the k = 4
+partition as reference, the complete cascade -- closed-form spreading,
+spectral-operator HGNN, and dual-attention HyperGAT -- runs on
+identical inputs, and `hg_agreement()` scores each fit against the
+partition (here the classifier inherits the clustering's own label
+names, so the `agreement` column is the score to read). Spreading
+first, with its two sensitivity checks:
+
+```{r}
+pool <- hg_cluster(hg, k = 4, seed = 1, type = "random_walk",
+                   what = "embedding")
+do.call(rbind, lapply(c(2, 5, 10), \(m)
+  cbind(seeds_per_topic = m,
+        hg_agreement(hg_classify(hg, labels = hg_seeds(pool, n = m),
+                                 type = "random_walk",
+                                 normalization = "class_mass"),
+                     topics4))))
+do.call(rbind, lapply(c(0.9, 0.99, 0.999), \(x)
+  cbind(xi = x,
+        hg_agreement(hg_classify(hg, labels = hg_seeds(pool, n = 5),
+                                 xi = x, type = "random_walk",
+                                 normalization = "class_mass"),
+                     topics4))))
+```
+
+Five seeds per topic reproduce 63% of the unsupervised partition, ten
+reach 70%, and two manage only 47% -- no better than always predicting
+the largest topic. The result is insensitive to the spreading
+parameter (62--63% across xi from 0.9 to 0.999), so the label budget,
+not the tuning, is the binding constraint. The same protocol against
+the finer k = 8 reference, with five seeds per topic (40 labels):
+
+```{r}
+pool8 <- hg_cluster(hg, k = 8, seed = 1, type = "random_walk",
+                    what = "embedding")
+hg_agreement(hg_classify(hg, labels = hg_seeds(pool8, n = 5),
+                         type = "random_walk",
+                         normalization = "class_mass"),
+             topics8)
+```
+
+67% agreement on the eight-topic labeling -- the eight-way problem is
+no harder than the four-way one once each topic has its five seeds.
+
+The neural tier, same 20 labels. `hg_neural()` trains an HGNN whose
+propagation operator is the spreading operator with learned filters;
+training is stochastic, so the sbert-feature run is repeated over three
+torch seeds. `hg_hypergat()`, the dual-attention document-level
+architecture, runs on the raw abstracts with the same labels.
+
+```{r neural}
+seeds20 <- hg_seeds(pool, n = 5)
+spread_run <- cbind(method = "hg_classify (spreading)", torch_seed = NA,
+                    hg_agreement(hg_classify(hg, labels = seeds20,
+                                             type = "random_walk",
+                                             normalization = "class_mass"),
+                                 topics4))
+bow_run <- cbind(method = "hg_neural (bag-of-words)", torch_seed = 1,
+                 hg_agreement(hg_neural(hg, labels = seeds20, hidden = 32,
+                                        epochs = 300, seed = 1,
+                                        validation = 0), topics4))
+sbert_runs <- do.call(rbind, lapply(1:3, \(s)
+  cbind(method = "hg_neural (sbert features)", torch_seed = s,
+        hg_agreement(hg_neural(hg, labels = seeds20,
+                               features = covid_embeddings, hidden = 32,
+                               epochs = 300, seed = s, validation = 0),
+                     topics4))))
+sbert_runs
+```
+
+```{r hypergat}
+hypergat_runs <- do.call(rbind, lapply(1:3, \(s)
+  cbind(method = "hg_hypergat (dual attention)", torch_seed = s,
+        hg_agreement(hg_hypergat(covid_abstracts, labels = seeds20,
+                                 column = "abstract", id = "doc",
+                                 epochs = 10, seed = s, validation = 0),
+                     topics4))))
+hypergat_runs
+```
+
+```{r}
+cascade <- rbind(spread_run, bow_run, sbert_runs, hypergat_runs)
+aggregate(agreement ~ method, data = cascade, mean)
+```
+
+The cascade's verdict is unambiguous and consistent with the package's
+full benchmark study: at 20 labels on 165 documents, closed-form
+spreading (63%) beats every neural architecture -- HGNN on
+bag-of-words features (31%) cannot estimate its first layer from 20
+examples, sbert features lift it to 52% with heavy seed-to-seed
+variance, and HyperGAT (45%) has a vocabulary-by-300 embedding table
+and nothing to fit it with. The same architectures, on the package's
+R8/R52 benchmarks with thousands of labels, are the strongest tools it
+has (HyperGAT R8 0.9665, R52 0.9433). Label budget selects the
+architecture; on a corpus of this size, the closed-form verb is the
+right one, and the neural tier is the documented scale-up path.
+
+## What the case shows
+
+Against the published multimethod synthesis, the hypergraph pipeline
+on a 4% sample:
+
+- **Recovers the macro-structure.** Group-level topic prevalence
+  matches the published STM to within about five points
+  (education-related 29.7 vs 28.7, distance/online 43.0 vs 37.9,
+  diverse 27.3 vs 33.2), with the same largest group.
+- **Recovers the dominant topic and most named topics.** Online
+  education is the largest topic in both analyses; seven of eight
+  recovered clusters map to specific published topics (Medical
+  Education, Well-being, School closure/Teachers, Emergency/Remote
+  education, Higher education, Education).
+- **Finds its own resolution ceiling.** `hg_stability()` shows k = 8
+  is the finest supported solution and the published k = 16 is not
+  estimable from 165 documents -- the model-selection question the
+  paper answered with 40 candidate models and four experts, answered
+  here by a reproducibility criterion.
+- **Passes its own falsification checks.** The null test confirms the
+  co-occurrence structure is non-random (z = 3.32, p = 0.01) before
+  any topic is interpreted; margin-invariant statistics behave as the
+  null requires.
+- **Adds what the paper's window could not contain.** A public-trust-
+  in-science topic with no published counterpart, and a temporal drift
+  from emergency online delivery (35% of 2020) toward general
+  reflection (55% of 2022) that extends the paper's narrative past its
+  2021 horizon.
+- **Puts numbers on the labeling step.** Spreading from five examples
+  per topic reproduces 63--67% of the partition at either resolution
+  and is insensitive to its tuning parameter; every neural
+  architecture loses at this label budget and wins at benchmark scale.
+
+The one caution the case study insists on: lexical and semantic
+constructions partition this corpus almost independently (adjusted
+Rand 0.04--0.08), so "the topics" always means "the topics under a
+named construction" -- which is also true, silently, of every
+bag-of-words topic model, including the published one.
+
+## References
+
+Chitra, U., & Raphael, B. (2019). Random walks on hypergraphs with
+edge-dependent vertex weights. *ICML 36*.
+
+Ding, K., Wang, J., Li, J., Li, D., & Liu, H. (2020). Be more with
+less: Hypergraph attention networks for inductive text classification.
+*EMNLP 2020*.
+
+Feng, Y., You, H., Zhang, Z., Ji, R., & Gao, Y. (2019). Hypergraph
+neural networks. *AAAI 33*.
+
+Gotelli, N. J. (2000). Null model analysis of species co-occurrence
+patterns. *Ecology*, 81(9).
+
+Hayashi, K., Aksoy, S., Park, C., & Park, H. (2020). Hypergraph random
+walks, Laplacians, and clustering. *CIKM 29*.
+
+Hubert, L., & Arabie, P. (1985). Comparing partitions. *Journal of
+Classification*, 2, 193--218.
+
+Saqr, M., Raspopovic Milic, M., Pancheva, K., Jovic, J., Peltekova,
+E. V., & Conde, M. A. (2024). A multimethod synthesis of Covid-19
+education research: the tightrope between covidization and
+meaningfulness. *Universal Access in the Information Society*, 23,
+1163--1176.
+
+Zhou, D., Huang, J., & Scholkopf, B. (2006). Learning with hypergraphs:
+Clustering, classification, and embedding. *NeurIPS 19*.

@@ -1,21 +1,45 @@
 Package: honets
-Title: Higher-Order Network Analysis from Sequence Data
-Version: 0.1.4
+Title: Higher-Order Network Analysis
+Version: 0.3.0
 Authors@R: c(
-    person("Mohammed", "Saqr", email = "saqr@saqr.me", role = c("aut", "cre", "cph"))
+    person("Mohammed", "Saqr", email = "saqr@saqr.me", role = c("aut", "cre", "cph"),
+           comment = c(ORCID = "0000-0001-5881-3109"))
     )
-Description: Build and analyze higher-order networks from categorical
-    sequence data. Implements higher-order networks (HON) with rule
-    extraction Xu, Wickramarathne, and Chawla (2016)
-    <doi:10.1126/sciadv.1600028>, higher-order network embedding (HONEM)
-    Saebi et al. (2020) <doi:10.1089/big.2019.0169>, hypergeometric path
-    anomaly detection (HYPA) LaRock et al. (2020)
-    <doi:10.1137/1.9781611976236.52>, and the multi-order generative
-    model (MOGen) Scholtes (2017) <doi:10.1145/3097983.3098145>. Includes
-    a permutation-based Markov order test and a per-context path-dependence
-    diagnostic based on conditional Kullback-Leibler divergence.
+Description: Build and analyze higher-order networks, in which a relation
+    can involve more than two nodes or can depend on more than the current
+    node. Covers the three structure families of the higher-order network
+    literature Battiston et al. (2020) <doi:10.1016/j.physrep.2020.05.004>,
+    plus a text family that reads a corpus as a hypergraph.
+    Memory networks from categorical sequences: higher-order networks with
+    rule extraction Xu, Wickramarathne, and Chawla (2016)
+    <doi:10.1126/sciadv.1600028>, higher-order network embedding Saebi et
+    al. (2020) <doi:10.1089/big.2019.0169>, hypergeometric path anomaly
+    detection LaRock et al. (2020) <doi:10.1137/1.9781611976236.52>, the
+    multi-order generative model Scholtes (2017)
+    <doi:10.1145/3097983.3098145>, higher-order centralities Scholtes,
+    Wider, and Garas (2016) <doi:10.1140/epjb/e2016-60663-0>, a
+    permutation-based Markov order test, a path-dependence diagnostic, and
+    bootstrap and permutation inference for extracted rules. Simplicial
+    complexes: clique, Vietoris-Rips and pathway complexes, Betti numbers,
+    persistent homology, persistence landscapes and bottleneck distances,
+    and q-analysis. Hypergraphs: construction from network cliques, sliding
+    windows over sequences, bipartite group membership, or embedding
+    nearest neighbours; structural measures; tensor eigenvector
+    centralities Benson (2019) <doi:10.1137/18M1203031>; PageRank with
+    edge-dependent vertex weights Chitra and Raphael (2019)
+    <doi:10.48550/arXiv.1905.08287>; the weighted normalized hypergraph
+    Laplacian of Zhou, Huang, and Scholkopf (2006) with spectral and
+    random-walk clustering Hayashi et al. (2020)
+    <doi:10.1145/3340531.3412034> and transductive label spreading;
+    projections to weighted graphs and s-line graphs; null models by degree-
+    preserving swaps and the configuration model; and hypergraph neural
+    networks (HGNN, HyperGAT) in native 'torch'. Text hypergraphs: a
+    corpus becomes a weighted document-word hypergraph in either
+    orientation (bag of words with smoothed tf-idf, token windows, or
+    embedding nearest neighbours), analysed with tidy verbs for clustering,
+    keyword extraction, few-label classification, and null testing.
 License: MIT + file LICENSE
-URL: https://github.com/mohsaqr/honets
+URL: https://github.com/mohsaqr/honets, https://mohsaqr.github.io/honets
 BugReports: https://github.com/mohsaqr/honets/issues
 Language: en-US
 Encoding: UTF-8
@@ -25,13 +49,24 @@ Depends:
     R (>= 4.4)
 Imports:
     ggplot2,
-    grid,
     graphics,
+    grid,
+    Matrix,
+    methods,
     parallel,
+    RSpectra,
     stats,
     utils
 Suggests:
+    cograph,
     gridExtra,
-    testthat (>= 3.0.0)
+    igraph,
+    knitr,
+    rmarkdown,
+    sbert,
+    testthat (>= 3.0.0),
+    torch
+Additional_repositories: https://mohsaqr.r-universe.dev
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 LazyData: true
